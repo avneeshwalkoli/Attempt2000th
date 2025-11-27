@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Welcome to VisionDesk</title>
+  <link rel="stylesheet" href="./css/onboarding.css">
+  <link rel="stylesheet" href="./css/onboarding-h.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+</head>
+<body>
+  <div class="onboarding-container">
+    <!-- Left Side - Welcome Section -->
+    <div class="welcome-section">
+      <div class="logo">
+        <i class="fas fa-desktop"></i>
+        <span>VisionDesk</span>
+      </div>
+      
+      <div class="welcome-content">
+        <h1>Welcome to VisionDesk</h1>
+        <p class="subtitle">Your all-in-one suite for messaging, calling, meetings, and secure remote access.</p>
+        
+        <div class="features-grid">
+          <div class="feature-card">
+            <div class="icon"><i class="fas fa-comment-dots"></i></div>
+            <h3>Messaging</h3>
+            <p>Fast, secure, real-time conversation.</p>
+          </div>
+          
+          <div class="feature-card">
+            <div class="icon"><i class="fas fa-video"></i></div>
+            <h3>Video & Voice Calls</h3>
+            <p>Crystal-clear WebRTC-powered communication.</p>
+          </div>
+          
+          <div class="feature-card">
+            <div class="icon"><i class="fas fa-laptop-house"></i></div>
+            <h3>Remote Desktop</h3>
+            <p>Secure access to your devices from anywhere.</p>
+          </div>
+          
+          <div class="feature-card">
+            <div class="icon"><i class="fas fa-users"></i></div>
+            <h3>Team Collaboration</h3>
+            <p>File sharing, meetings, call history & more.</p>
+          </div>
+        </div>
+      </div>
+      
+      <div class="system-status">
+        <h3>System Status</h3>
+        <div class="status-item">
+          <i class="fas fa-check-circle success"></i>
+          <span>Internet Connection</span>
+        </div>
+        <div class="status-item">
+          <i class="fas fa-check-circle success"></i>
+          <span>Microphone</span>
+        </div>
+        <div class="status-item">
+          <i class="fas fa-check-circle success"></i>
+          <span>Camera</span>
+        </div>
+        <div class="status-item">
+          <i class="fas fa-check-circle success"></i>
+          <span>Screen Sharing</span>
+        </div>
+      </div>
+      
+      <footer class="footer">
+        <a href="#">Privacy Policy</a>
+        <span>•</span>
+        <a href="#">Terms of Service</a>
+        <span>•</span>
+        <a href="#">Help Center</a>
+      </footer>
+    </div>
+    
+    <!-- Right Side - Setup Section -->
+    <div class="setup-section">
+      <div class="setup-content">
+        <h2>Let's Get Started</h2>
+        <p class="setup-subtitle">Sign in or create an account to continue</p>
+        
+        <div class="auth-buttons">
+          <button class="btn btn-google">
+            <i class="fab fa-google"></i>
+            Continue with Google
+          </button>
+          
+          <button class="btn btn-email">
+            <i class="fas fa-envelope"></i>
+            Continue with Email
+          </button>
+          
+          <div class="divider">
+            <span>or</span>
+          </div>
+          
+          <button class="btn btn-create">
+            Create New Account
+          </button>
+          
+          <p class="signin-prompt">
+            Already have an account? <a href="#" class="signin-link">Sign in</a>
+          </p>
+        </div>
+        
+        <div class="permissions-section">
+          <h3>Required Permissions</h3>
+          <p class="permissions-subtitle">We need these permissions to provide the best experience</p>
+          
+          <div class="permission-item checked">
+            <div class="permission-icon">
+              <i class="fas fa-check"></i>
+            </div>
+            <div class="permission-details">
+              <h4>Microphone Access</h4>
+              <p>Required for voice calls and meetings</p>
+            </div>
+          </div>
+          
+          <div class="permission-item checked">
+            <div class="permission-icon">
+              <i class="fas fa-check"></i>
+            </div>
+            <div class="permission-details">
+              <h4>Camera Access</h4>
+              <p>Required for video calls and meetings</p>
+            </div>
+          </div>
+          
+          <div class="permission-item checked">
+            <div class="permission-icon">
+              <i class="fas fa-check"></i>
+            </div>
+            <div class="permission-details">
+              <h4>Screen Sharing</h4>
+              <p>Required for presentations and remote assistance</p>
+            </div>
+          </div>
+          
+          <div class="permission-item">
+            <div class="permission-icon">
+              <i class="fas fa-check"></i>
+            </div>
+            <div class="permission-details">
+              <h4>File System Access</h4>
+              <p>Optional: For file sharing and storage</p>
+            </div>
+            <div class="permission-toggle">
+              <label class="switch">
+                <input type="checkbox">
+                <span class="slider round"></span>
+              </label>
+            </div>
+          </div>
+        </div>
+        
+        <button id="continueBtn" class="btn btn-primary continue-btn">
+          Continue to VisionDesk
+          <i class="fas fa-arrow-right"></i>
+        </button>
+      </div>
+    </div>
+  </div>
+  
+  <script>
+    // Simple navigation script for the continue button
+    document.addEventListener('DOMContentLoaded', () => {
+      const continueBtn = document.getElementById('continueBtn');
+      if (continueBtn) {
+        continueBtn.addEventListener('click', () => {
+          window.location.href = './components/auth/AuthHome.html';
+        });
+      }
+    });
+  </script>
+</body>
+</html>

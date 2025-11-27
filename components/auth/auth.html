@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Login - VisionDesk</title>
+  <link rel="stylesheet" href="auth.css" />
+</head>
+
+<body>
+  <div class="container">
+    <h2>VisionDesk Login</h2>
+
+    <input id="email" type="email" placeholder="Email" />
+    <input id="password" type="password" placeholder="Password" />
+
+    <button onclick="loginUser()">Login</button>
+
+    <p>Don’t have an account?
+      <span onclick="showSignup()">Create one</span>
+    </p>
+  </div>
+
+  <script src="auth.api.js"></script>
+  <script src="auth.state.js"></script>
+  <script src="auth.js"></script>
+</body>
+</html>

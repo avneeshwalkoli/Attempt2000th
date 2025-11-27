@@ -10,7 +10,7 @@ function createWindow() {
     }
   });
 
-  win.loadFile('index.html');
+  win.loadFile('onboarding-h.html');
 }
 
 app.whenReady().then(() => {
