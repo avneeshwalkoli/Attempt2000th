@@ -9,80 +9,108 @@ const generateToken = require('../utils/generateToken');
  * @access  Public
  */
 const signup = async (req, res) => {
-  const { name, email, password } = req.body;
+  const { fullName, email, password, countryCode, phoneNumber } = req.body;
 
   try {
-    const userExists = await User.findOne({ email });
+    if (!fullName || !email || !password || !countryCode || !phoneNumber) {
+      return res.status(400).json({ message: 'All fields are required' });
+    }
 
-    if (userExists) {
-      return res.status(400).json({ message: 'User already exists' });
+    const existingByPhone = await User.findOne({ countryCode, phoneNumber });
+    if (existingByPhone) {
+      return res.status(400).json({ message: 'Phone number already registered' });
+    }
+
+    const existingByEmail = await User.findOne({ email: email.toLowerCase() });
+    if (existingByEmail) {
+      return res.status(400).json({ message: 'Email already registered' });
     }
 
     const user = await User.create({
-      name,
-      email,
+      fullName: fullName.trim(),
+      email: email.toLowerCase().trim(),
       password,
+      countryCode: countryCode.trim(),
+      phoneNumber: phoneNumber.trim(),
     });
 
-    if (user) {
-      res.status(201).json({
-        _id: user._id,
-        name: user.name,
+    const token = generateToken(user._id);
+
+    res.status(201).json({
+      user: {
+        id: user._id,
+        fullName: user.fullName,
         email: user.email,
-        token: generateToken(user._id),
-      });
-    } else {
-      res.status(400).json({ message: 'Invalid user data' });
-    }
+        countryCode: user.countryCode,
+        phoneNumber: user.phoneNumber,
+      },
+      token,
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
 /**
- * @desc    Auth user & get token
+ * @desc    Auth user by phone & get token
  * @route   POST /api/auth/login
  * @access  Public
  */
 const login = async (req, res) => {
-  const { email, password } = req.body;
+  const { countryCode, phoneNumber, password } = req.body;
 
   try {
-    const user = await User.findOne({ email }).select('+password');
-
-    if (user && (await user.matchPassword(password))) {
-      res.json({
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        token: generateToken(user._id),
-      });
-    } else {
-      res.status(401).json({ message: 'Invalid email or password' });
+    if (!countryCode || !phoneNumber || !password) {
+      return res.status(400).json({ message: 'Country code, phone number and password are required' });
     }
+
+    const user = await User.findOne({ countryCode, phoneNumber }).select('+password');
+
+    if (!user) {
+      return res.status(401).json({ message: 'Invalid phone number or password' });
+    }
+
+    const isMatch = await user.matchPassword(password);
+    if (!isMatch) {
+      return res.status(401).json({ message: 'Invalid phone number or password' });
+    }
+
+    const token = generateToken(user._id);
+
+    res.json({
+      user: {
+        id: user._id,
+        fullName: user.fullName,
+        email: user.email,
+        countryCode: user.countryCode,
+        phoneNumber: user.phoneNumber,
+      },
+      token,
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
 /**
- * @desc    Forgot password
- * @route   POST /api/auth/forgot
- * @access  Public
+ * @desc    Get current authenticated user
+ * @route   GET /api/auth/me
+ * @access  Private
  */
-const forgotPassword = async (req, res) => {
-  // Logic for forgot password will be implemented here
-  res.status(200).json({ message: 'Forgot password route' });
+const getMe = async (req, res) => {
+  if (!req.user) {
+    return res.status(401).json({ message: 'Not authorized' });
+  }
+
+  res.json({
+    user: {
+      id: req.user._id,
+      fullName: req.user.fullName,
+      email: req.user.email,
+      countryCode: req.user.countryCode,
+      phoneNumber: req.user.phoneNumber,
+    },
+  });
 };
 
-/**
- * @desc    Reset password
- * @route   POST /api/auth/reset/:token
- * @access  Public
- */
-const resetPassword = async (req, res) => {
-  // Logic for reset password will be implemented here
-  res.status(200).json({ message: 'Reset password route' });
-};
-
-module.exports = { signup, login, forgotPassword, resetPassword };
+module.exports = { signup, login, getMe };

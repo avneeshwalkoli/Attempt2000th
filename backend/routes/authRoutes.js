@@ -2,17 +2,12 @@
 
 const express = require('express');
 const router = express.Router();
-const {
-  signup,
-  login,
-  forgotPassword,
-  resetPassword,
-} = require('../controllers/authController');
+const { signup, login, getMe } = require('../controllers/authController');
+const { protect } = require('../middleware/authMiddleware');
 
-// Define authentication routes
+// Authentication routes
 router.post('/signup', signup);
 router.post('/login', login);
-router.post('/forgot', forgotPassword);
-router.post('/reset/:token', resetPassword);
+router.get('/me', protect, getMe);
 
 module.exports = router;

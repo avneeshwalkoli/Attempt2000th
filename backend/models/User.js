@@ -4,34 +4,51 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
 // Define the schema for the User model
-const userSchema = new mongoose.Schema({
-  name: {
-    type: String,
-    required: [true, 'Please provide a name'],
-    trim: true,
+const userSchema = new mongoose.Schema(
+  {
+    fullName: {
+      type: String,
+      required: [true, 'Please provide your full name'],
+      trim: true,
+    },
+    email: {
+      type: String,
+      required: [true, 'Please provide an email'],
+      unique: true,
+      lowercase: true,
+      match: [
+        /^(([^<>()[\]\\.,;:\s@"]+(\.[^<>()[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/,
+        'Please provide a valid email',
+      ],
+    },
+    countryCode: {
+      type: String,
+      required: [true, 'Country code is required'],
+      trim: true,
+    },
+    phoneNumber: {
+      type: String,
+      required: [true, 'Phone number is required'],
+      trim: true,
+    },
+    password: {
+      type: String,
+      required: [true, 'Please provide a password'],
+      minlength: 6,
+      select: false,
+    },
+    createdAt: {
+      type: Date,
+      default: Date.now,
+    },
   },
-  email: {
-    type: String,
-    required: [true, 'Please provide an email'],
-    unique: true,
-    match: [
-      /^(([^<>()[\]\\.,;:\s@"]+(\.[^<>()[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/,
-      'Please provide a valid email',
-    ],
-  },
-  password: {
-    type: String,
-    required: [true, 'Please provide a password'],
-    minlength: 6,
-    select: false, // Do not return password by default
-  },
-  resetPasswordToken: String,
-  resetPasswordExpire: Date,
-  createdAt: {
-    type: Date,
-    default: Date.now,
-  },
-});
+  {
+    timestamps: true,
+  }
+);
+
+// Ensure unique identity based on countryCode + phoneNumber
+userSchema.index({ countryCode: 1, phoneNumber: 1 }, { unique: true });
 
 // Middleware to hash the password before saving the user
 userSchema.pre('save', async function (next) {
@@ -46,7 +63,7 @@ userSchema.pre('save', async function (next) {
 
 // Method to compare entered password with the hashed password
 userSchema.methods.matchPassword = async function (enteredPassword) {
-  return await bcrypt.compare(enteredPassword, this.password);
+  return bcrypt.compare(enteredPassword, this.password);
 };
 
 const User = mongoose.model('User', userSchema);
