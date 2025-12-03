@@ -1,111 +1,214 @@
-const { Server } = require('socket.io');
-const jwt = require('jsonwebtoken');
-const Message = require('./models/Message');
-const User = require('./models/User');
-const Contact = require('./models/Contact');
+/**
+ * Socket.IO Signaling Server for WebRTC
+ * Handles all WebRTC signaling events
+ */
 
-function createSocketServer(httpServer, corsOrigin) {
-  const io = new Server(httpServer, {
+const { Server } = require('socket.io');
+
+function createSocketServer(server, clientOrigin) {
+  const io = new Server(server, {
     cors: {
-      origin: corsOrigin,
+      origin: clientOrigin,
       methods: ['GET', 'POST'],
+      credentials: true,
     },
   });
 
-  io.use(async (socket, next) => {
-    const token = socket.handshake.auth?.token;
-    if (!token) {
-      return next(new Error('Authentication token missing'));
-    }
-
-    try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      const user = await User.findById(decoded.id);
-      if (!user) {
-        return next(new Error('User not found'));
-      }
-
-      socket.user = {
-        id: user._id.toString(),
-        fullName: user.fullName,
-        countryCode: user.countryCode,
-        phoneNumber: user.phoneNumber,
-      };
-
-      next();
-    } catch (err) {
-      next(new Error('Invalid token'));
-    }
-  });
+  // Store room data
+  const rooms = new Map(); // Map<roomId, Map<userId, {socketId, userName, isHost}>>
 
   io.on('connection', (socket) => {
-    const userPhone = `${socket.user.countryCode} ${socket.user.phoneNumber}`;
+    console.log('User connected:', socket.id);
 
-    socket.join(userPhone);
+    // User joined room
+    socket.on('user-joined', ({ roomId, userId, userName, isHost }) => {
+      socket.join(roomId);
+      socket.data.roomId = roomId;
+      socket.data.userId = userId;
+      socket.data.userName = userName;
+      socket.data.isHost = isHost;
 
-    socket.on('private-message', async (payload) => {
-      try {
-        const text = String(payload.text || '').trim();
-        const toPhone = String(payload.to || '').trim();
-        if (!text || !toPhone) return;
+      // Add to room
+      if (!rooms.has(roomId)) {
+        rooms.set(roomId, new Map());
+      }
+      rooms.get(roomId).set(userId, {
+        socketId: socket.id,
+        userName,
+        isHost,
+      });
 
-        const sanitizedText = text.slice(0, 5000);
+      // Send list of existing users to the new user
+      const existingUsers = Array.from(rooms.get(roomId).entries())
+        .filter(([uid]) => uid !== userId)
+        .map(([uid, data]) => ({
+          userId: uid,
+          userName: data.userName,
+          isHost: data.isHost,
+        }));
 
-        const msg = await Message.create({
-          senderPhone: userPhone,
-          receiverPhone: toPhone,
-          text: sanitizedText,
-          timestamp: new Date(),
-        });
+      socket.emit('room-users', existingUsers);
 
-        // Ensure receiver has an (unsaved) contact entry for sender
-        try {
-          const receiverUser = await User.findOne({
-            countryCode: toPhone.split(' ')[0],
-            phoneNumber: toPhone.split(' ').slice(1).join(' '),
+      // Notify others in room about new user
+      socket.to(roomId).emit('user-joined', {
+        userId,
+        userName,
+        isHost,
+      });
+
+      console.log(`User ${userName} (${userId}) joined room ${roomId}`);
+    });
+
+    // Send offer - target specific user
+    socket.on('offer', ({ roomId, to, offer }) => {
+      const roomUsers = rooms.get(roomId);
+      if (!roomUsers) return;
+
+      const targetUser = roomUsers.get(to);
+      if (targetUser) {
+        const targetSocket = io.sockets.sockets.get(targetUser.socketId);
+        if (targetSocket) {
+          targetSocket.emit('offer', {
+            from: socket.data.userId,
+            offer,
           });
-
-          if (receiverUser) {
-            const senderUser = await User.findOne({
-              countryCode: socket.user.countryCode,
-              phoneNumber: socket.user.phoneNumber,
-            });
-
-            if (senderUser) {
-              const existingContact = await Contact.findOne({
-                ownerId: receiverUser._id,
-                contactUserId: senderUser._id,
-              });
-
-              if (!existingContact) {
-                await Contact.create({
-                  ownerId: receiverUser._id,
-                  contactUserId: senderUser._id,
-                  saved: false,
-                });
-              }
-            }
-          }
-        } catch (contactErr) {
-          console.error('Error ensuring unsaved contact for receiver', contactErr.message);
         }
-
-        const messageForClient = {
-          id: msg._id,
-          senderPhone: msg.senderPhone,
-          receiverPhone: msg.receiverPhone,
-          text: msg.text,
-          timestamp: msg.timestamp,
-        };
-
-        io.to(userPhone).to(toPhone).emit('private-message', messageForClient);
-      } catch (err) {
-        console.error('Error handling private-message', err.message);
       }
     });
 
+    // Send answer - target specific user
+    socket.on('answer', ({ roomId, to, answer }) => {
+      const roomUsers = rooms.get(roomId);
+      if (!roomUsers) return;
+
+      const targetUser = roomUsers.get(to);
+      if (targetUser) {
+        const targetSocket = io.sockets.sockets.get(targetUser.socketId);
+        if (targetSocket) {
+          targetSocket.emit('answer', {
+            from: socket.data.userId,
+            answer,
+          });
+        }
+      }
+    });
+
+    // Send ICE candidate - target specific user
+    socket.on('ice-candidate', ({ roomId, to, candidate }) => {
+      const roomUsers = rooms.get(roomId);
+      if (!roomUsers) return;
+
+      const targetUser = roomUsers.get(to);
+      if (targetUser) {
+        const targetSocket = io.sockets.sockets.get(targetUser.socketId);
+        if (targetSocket) {
+          targetSocket.emit('ice-candidate', {
+            from: socket.data.userId,
+            candidate,
+          });
+        }
+      }
+    });
+
+    // Screen share started
+    socket.on('screen-share-started', ({ roomId, userId }) => {
+      socket.to(roomId).emit('screen-share-started', {
+        userId,
+      });
+      console.log(`Screen share started by ${userId} in room ${roomId}`);
+    });
+
+    // Screen share stopped
+    socket.on('screen-share-stopped', ({ roomId, userId }) => {
+      socket.to(roomId).emit('screen-share-stopped', {
+        userId,
+      });
+      console.log(`Screen share stopped by ${userId} in room ${roomId}`);
+    });
+
+    // Audio mute
+    socket.on('audio-mute', ({ roomId, userId }) => {
+      socket.to(roomId).emit('audio-mute', {
+        userId,
+      });
+    });
+
+    // Audio unmute
+    socket.on('audio-unmute', ({ roomId, userId }) => {
+      socket.to(roomId).emit('audio-unmute', {
+        userId,
+      });
+    });
+
+    // Video mute
+    socket.on('video-mute', ({ roomId, userId }) => {
+      socket.to(roomId).emit('video-mute', {
+        userId,
+      });
+    });
+
+    // Video unmute
+    socket.on('video-unmute', ({ roomId, userId }) => {
+      socket.to(roomId).emit('video-unmute', {
+        userId,
+      });
+    });
+
+    // End meeting (host only)
+    socket.on('end-meeting', ({ roomId, userId }) => {
+      const roomUsers = rooms.get(roomId);
+      if (!roomUsers) {
+        console.warn(`Room ${roomId} not found`);
+        return;
+      }
+
+      const user = roomUsers.get(userId);
+      if (!user || !user.isHost) {
+        console.warn(`User ${userId} attempted to end meeting but is not host`);
+        return;
+      }
+
+      // Get host name for the message
+      const hostName = user.userName || 'Host';
+
+      // Broadcast meeting ended to ALL participants in the room (including host)
+      // Using io.to(roomId) ensures everyone in the room receives the message
+      io.to(roomId).emit('meeting-ended', {
+        roomId,
+        endedBy: userId,
+        endedByName: hostName,
+        message: `${hostName} ended the meeting`,
+      });
+
+      console.log(`Meeting ${roomId} ended by host ${hostName} (${userId}). Notifying all ${roomUsers.size} participants.`);
+
+      // Delete the room after a short delay to ensure message is sent
+      setTimeout(() => {
+        rooms.delete(roomId);
+        console.log(`Room ${roomId} deleted after meeting end`);
+      }, 1000);
+    });
+
+    // User left
     socket.on('disconnect', () => {
-      // Cleanup or logging if needed
+      const { roomId, userId } = socket.data;
+      if (roomId && userId) {
+        // Remove from room
+        if (rooms.has(roomId)) {
+          rooms.get(roomId).delete(userId);
+          if (rooms.get(roomId).size === 0) {
+            rooms.delete(roomId);
+            console.log(`Room ${roomId} deleted (empty)`);
+          }
+        }
+
+        // Notify others
+        socket.to(roomId).emit('user-left', {
+          userId,
+        });
+
+        console.log(`User ${userId} left room ${roomId}`);
+      }
     });
   });
 

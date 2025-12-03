@@ -3,6 +3,7 @@ import SidebarShell from './SidebarShell.jsx';
 import { useAuth } from '../../auth/hooks/useAuth.js';
 import { contactsApi } from '../services/contacts.api.js';
 import AddContactModal from './AddContactModal.jsx';
+import { MessageSquare, Users, Star, Settings, Video, LogOut, Sun, Moon } from 'lucide-react'; // Real Icons
 
 const LAST_CHAT_KEY = 'vd_last_active_chat_phone';
 

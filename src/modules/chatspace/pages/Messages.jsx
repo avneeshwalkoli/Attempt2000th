@@ -11,6 +11,9 @@ export default function Messages() {
   const [activeContact, setActiveContact] = useState(null);
   const [messages, setMessages] = useState([]);
   const [contactsRefreshKey, setContactsRefreshKey] = useState(0);
+  
+  // Get theme from local storage for the main container background
+  const [theme, setTheme] = useState(localStorage.getItem('theme') || 'light');
 
   const handleSocketMessage = useCallback(
     (msg) => {
@@ -59,6 +62,16 @@ export default function Messages() {
       }
     };
     loadHistory();
+
+    // Event listener to update theme when toggle is clicked in a child component
+    const handleThemeChange = () => {
+        setTheme(localStorage.getItem('theme') || 'light');
+    };
+    window.addEventListener('storage', handleThemeChange);
+
+    return () => {
+        window.removeEventListener('storage', handleThemeChange);
+    };
   }, [token, activePhone]);
 
   const handleSelectContact = (phone) => {
@@ -73,14 +86,19 @@ export default function Messages() {
     sendMessage(activePhone, text);
   };
 
+  const containerBg = theme === 'dark' ? 'bg-gray-900' : 'bg-gray-100';
+  const containerText = theme === 'dark' ? 'text-gray-100' : 'text-gray-900';
+
+
   return (
-    <div className="min-h-screen flex bg-slate-950 text-slate-50">
+    <div className={`min-h-screen flex ${containerBg} ${containerText} transition-colors duration-500 w-full`}>
       <SidebarContacts
         activePhone={activePhone}
         onSelectContact={handleSelectContact}
         refreshKey={contactsRefreshKey}
+        // Assuming SidebarContacts and ChatWindow will handle their own internal styling based on localStorage or props
       />
-      <main className="flex-1 flex">
+      <main className="flex-1 flex overflow-hidden">
         <ChatWindow
           activeContact={activeContact}
           messages={messages}

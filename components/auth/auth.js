@@ -18,6 +18,6 @@ async function loginUser() {
   }
   
   function showSignup() {
-    window.router.loadPage("components/auth/signup.html");
+    window.router.loadPage("components/auth/signup.jsx");
   }
   

@@ -1,18 +1,33 @@
 /* auth.css */
 
-/* --- Base Styles --- */
+/* --- Base Variables (Light Mode Default) --- */
 :root {
+  /* Light Theme */
   --primary-color: #4a6cf7;
   --primary-hover: #3a5ce4;
   --text-primary: #1a1a1a;
   --text-secondary: #666;
   --border-color: #eaeaea;
   --bg-light: #f8f9ff;
+  --card-bg: #ffffff;
   --shadow-md: 0 8px 30px rgba(0, 0, 0, 0.08);
   --border-radius: 14px;
   --transition: all 0.3s ease;
 }
 
+/* --- Dark Mode Variables --- */
+body[data-theme='dark'] {
+  --primary-color: #79a6fe; /* Lighter blue for better contrast */
+  --primary-hover: #5e8cf7;
+  --text-primary: #f0f0f0;
+  --text-secondary: #aaaaaa;
+  --border-color: #333333;
+  --bg-light: #121212;
+  --card-bg: #1e1e1e;
+  --shadow-md: 0 8px 30px rgba(0, 0, 0, 0.4);
+}
+
+/* --- Global Reset & Typography --- */
 * {
   margin: 0;
   padding: 0;
@@ -30,14 +45,16 @@ body {
   min-height: 100vh;
   overflow: hidden;
   position: relative;
+  transition: background-color var(--transition), color var(--transition);
 }
 
-/* --- Background Shapes --- */
+/* --- Background Shapes (Slightly adjusted for better dark mode visibility) --- */
 .shape {
   position: absolute;
   border-radius: 50%;
   filter: blur(120px);
   z-index: -1;
+  transition: background var(--transition);
 }
 
 .shape-1 {
@@ -56,6 +73,14 @@ body {
   background: rgba(109, 137, 249, 0.1);
 }
 
+body[data-theme='dark'] .shape-1 {
+  background: rgba(74, 108, 247, 0.2);
+}
+
+body[data-theme='dark'] .shape-2 {
+  background: rgba(109, 137, 249, 0.2);
+}
+
 /* --- Authentication Container & Card --- */
 .auth-container {
   display: flex;
@@ -66,14 +91,15 @@ body {
 }
 
 .auth-card {
-  background: #ffffff;
+  background: var(--card-bg);
   padding: 3rem;
   border-radius: var(--border-radius);
   box-shadow: var(--shadow-md);
   width: 100%;
   max-width: 420px;
   text-align: center;
-  border: 1px solid #fff;
+  border: 1px solid var(--border-color); /* Use border-color variable */
+  transition: background var(--transition), border-color var(--transition);
 }
 
 /* --- Header --- */
@@ -86,13 +112,6 @@ body {
 .auth-header .subtitle {
   color: var(--text-secondary);
   margin-bottom: 2.5rem;
-}
-
-/* --- Action Buttons (AuthHome) --- */
-.auth-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
 }
 
 /* --- Forms (Login/Signup) --- */
@@ -117,13 +136,15 @@ body {
   border: 1px solid var(--border-color);
   border-radius: 8px;
   font-size: 1rem;
+  color: var(--text-primary); /* Ensure text color respects theme */
+  background-color: var(--card-bg); /* Ensure background color respects theme */
   transition: var(--transition);
 }
 
 .form-group input:focus {
   outline: none;
   border-color: var(--primary-color);
-  box-shadow: 0 0 0 3px rgba(74, 108, 247, 0.1);
+  box-shadow: 0 0 0 3px rgba(74, 108, 247, 0.2);
 }
 
 /* --- Buttons --- */
@@ -139,6 +160,7 @@ body {
   transition: var(--transition);
   text-decoration: none;
   text-align: center;
+  user-select: none;
 }
 
 .btn-primary {
@@ -149,6 +171,7 @@ body {
 .btn-primary:hover {
   background-color: var(--primary-hover);
   transform: translateY(-2px);
+  box-shadow: 0 4px 10px rgba(74, 108, 247, 0.2);
 }
 
 .btn-secondary {
@@ -159,7 +182,8 @@ body {
 
 .btn-secondary:hover {
   background-color: var(--bg-light);
-  border-color: #dcdcdc;
+  border-color: var(--primary-color);
+  transform: translateY(-2px);
 }
 
 /* --- Footer Link --- */
@@ -179,6 +203,37 @@ body {
   text-decoration: underline;
 }
 
+/* --- Dark Mode Toggle Styles --- */
+.theme-toggle-container {
+  position: absolute;
+  top: 1.5rem;
+  right: 1.5rem;
+}
+
+.theme-toggle {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 50px;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  transition: var(--transition);
+}
+
+.theme-toggle:hover {
+  border-color: var(--primary-color);
+}
+
+.icon {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
 /* --- Responsive Design --- */
 @media (max-width: 480px) {
   .auth-card {
@@ -187,5 +242,10 @@ body {
 
   .auth-header .title {
     font-size: 1.75rem;
+  }
+
+  .theme-toggle-container {
+    top: 1rem;
+    right: 1rem;
   }
 }

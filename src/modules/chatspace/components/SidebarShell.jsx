@@ -1,12 +1,18 @@
 import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { FaRegMessage } from "react-icons/fa6";
+import { SiGooglemeet } from "react-icons/si";
+import { CiSettings } from "react-icons/ci";
+import { FaRegStar } from "react-icons/fa";
+import { IoMdContacts } from "react-icons/io";
+import { IoIosLogOut } from "react-icons/io";
 
 const navItems = [
-  { id: 'messages', label: 'Messages', icon: '💬', path: '/workspace/messages' },
-  { id: 'contacts', label: 'Contacts', icon: '👥', path: '/workspace/messages?view=contacts' },
-  { id: 'starred', label: 'Starred', icon: '⭐', path: '/workspace/messages?view=starred' },
-  { id: 'settings', label: 'Settings', icon: '⚙️', path: '/workspace/messages?view=settings' },
-  { id: 'meet', label: 'Meet', icon: '📹', path: '/workspace/meet' },
+  { id: 'messages', label: 'Messages', icon: <FaRegMessage /> , path: '/workspace/messages' },
+  { id: 'contacts', label: 'Contacts', icon: <IoMdContacts />, path: '/workspace/messages?view=contacts' },
+  { id: 'starred', label: 'Starred', icon: <FaRegStar />    , path: '/workspace/messages?view=starred' },
+  { id: 'settings', label: 'Settings', icon: <CiSettings />, path: '/workspace/messages?view=settings' },
+  { id: 'meet', label: 'Meet', icon: <SiGooglemeet />, path: '/workspace/meet' },
 ];
 
 export default function SidebarShell() {
@@ -52,7 +58,8 @@ export default function SidebarShell() {
         className="w-10 h-10 rounded-2xl flex items-center justify-center text-lg text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors"
         title="Logout"
       >
-        ⎋
+        <IoIosLogOut />
+
       </button>
     </aside>
   );
