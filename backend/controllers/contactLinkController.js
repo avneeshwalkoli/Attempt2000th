@@ -78,8 +78,13 @@ const linkContact = async (req, res) => {
  */
 const listContactLinks = async (req, res) => {
   try {
+    const ownerUserId = req.params.ownerUserId || req.user._id;
+    if (String(ownerUserId) !== String(req.user._id)) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+
     const links = await ContactLink.find({
-      ownerUserId: req.user._id,
+      ownerUserId,
       blocked: false,
     })
       .populate('contactUserId', 'fullName email')

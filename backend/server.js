@@ -45,6 +45,39 @@ app.use('/api/remote', remoteRoutes);
 const server = http.createServer(app);
 createSocketServer(server, CLIENT_ORIGIN);
 
+// Metrics endpoint for observability
+app.get('/metrics', (req, res) => {
+  const { getMetrics } = require('./socketManager');
+  const metrics = getMetrics ? getMetrics() : {};
+  
+  // Prometheus-style text format
+  const lines = [
+    '# HELP desklink_active_sessions Number of active remote sessions',
+    '# TYPE desklink_active_sessions gauge',
+    `desklink_active_sessions ${metrics.activeSessions || 0}`,
+    '',
+    '# HELP desklink_offers_relayed_total Total WebRTC offers relayed',
+    '# TYPE desklink_offers_relayed_total counter',
+    `desklink_offers_relayed_total ${metrics.offersRelayed || 0}`,
+    '',
+    '# HELP desklink_ice_failures_total Total ICE candidate failures',
+    '# TYPE desklink_ice_failures_total counter',
+    `desklink_ice_failures_total ${metrics.iceFailures || 0}`,
+    '',
+    '# HELP desklink_datachannel_msgs_total Total datachannel messages',
+    '# TYPE desklink_datachannel_msgs_total counter',
+    `desklink_datachannel_msgs_total ${metrics.datachannelMsgs || 0}`,
+  ];
+  
+  res.set('Content-Type', 'text/plain; version=0.0.4');
+  res.send(lines.join('\n'));
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
 // Define the port
 const PORT = process.env.PORT || 5000;
 

@@ -31,6 +31,36 @@ const remoteSessionSchema = new mongoose.Schema(
       default: 'pending',
       index: true,
     },
+    meta: {
+      type: Object,
+      default: {},
+    },
+    sessionToken: {
+      type: String,
+      index: true,
+    },
+    permissions: {
+      viewOnly: { type: Boolean, default: false },
+      allowControl: { type: Boolean, default: true },
+      allowFileTransfer: { type: Boolean, default: true },
+      allowClipboard: { type: Boolean, default: true },
+    },
+    selectedMonitor: {
+      type: Number,
+      default: 0,
+    },
+    resolution: {
+      width: { type: Number, default: 1280 },
+      height: { type: Number, default: 720 },
+    },
+    audit: [
+      {
+        timestamp: { type: Date, default: Date.now },
+        event: String,
+        userId: mongoose.Schema.Types.ObjectId,
+        details: Object,
+      },
+    ],
     startedAt: {
       type: Date,
       default: Date.now,

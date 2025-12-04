@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
 import Messages from './modules/chatspace/pages/Messages.jsx';
 import Meet from './modules/meetspace/pages/Meet.jsx';
 import DeskLinkPage from './modules/desklink/pages/DeskLinkPage.jsx';
+const RemoteViewerPage = lazy(() => import('./modules/desklink/pages/RemoteViewerPage.jsx'));
 // --- AUTH IMPORTS ---
 import Welcome from './modules/auth/pages/Welcome.jsx'; // 💡 Make sure this path is correct!
 import Login from './modules/auth/pages/Login.jsx';
@@ -49,6 +50,14 @@ export default function App() {
           <Route path="/workspace/messages" element={<Messages />} />
           <Route path="/workspace/meet" element={<Meet />} />
           <Route path="/workspace/desklink" element={<DeskLinkPage />} />
+          <Route
+            path="/workspace/desklink/viewer"
+            element={
+              <Suspense fallback={<div className="min-h-screen bg-slate-950 flex items-center justify-center"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-500" /></div>}>
+                <RemoteViewerPage />
+              </Suspense>
+            }
+          />
           {/* Optional: Redirect from base /workspace to a default page */}
           <Route path="/workspace" element={<Navigate to="/workspace/messages" replace />} />
         </Route>

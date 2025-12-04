@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  # MongoDB Database
+  mongo:
+    image: mongo:7
+    container_name: desklink-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-changeme}
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - desklink-network
+
+  # Backend Node.js Server
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: desklink-backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      MONGO_URI: mongodb://${MONGO_USER:-admin}:${MONGO_PASSWORD:-changeme}@mongo:27017/desklink?authSource=admin
+      JWT_SECRET: ${JWT_SECRET:-your-secret-key-change-in-production}
+      TURN_SECRET: ${TURN_SECRET:-your-turn-secret}
+      TURN_URL: ${TURN_URL:-turn:coturn:3478}
+      CLIENT_ORIGIN: ${CLIENT_ORIGIN:-http://localhost:5173}
+    ports:
+      - "5000:5000"
+    depends_on:
+      - mongo
+    networks:
+      - desklink-network
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+
+  # Coturn TURN Server
+  coturn:
+    image: coturn/coturn:latest
+    container_name: desklink-coturn
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+    command: ["-c", "/etc/coturn/turnserver.conf"]
+
+  # Optional: Redis for scalable socket mapping
+  # Uncomment to enable Redis-based socket management
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: desklink-redis
+  #   restart: unless-stopped
+  #   ports:
+  #     - "6379:6379"
+  #   networks:
+  #     - desklink-network
+  #   volumes:
+  #     - redis-data:/data
+
+networks:
+  desklink-network:
+    driver: bridge
+
+volumes:
+  mongo-data:
+  # redis-data:

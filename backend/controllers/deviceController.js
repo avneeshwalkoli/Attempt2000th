@@ -16,7 +16,7 @@ const ensureOwnership = (device, userId) => {
  * Registers or updates a DeskLink device for the authenticated user.
  */
 const registerDevice = async (req, res) => {
-  const { userId, deviceId, osInfo, deviceName } = req.body;
+  const { userId, deviceId, osInfo, deviceName, platform } = req.body;
 
   if (!userId || !deviceId || !osInfo || !deviceName) {
     return res.status(400).json({ message: 'userId, deviceId, osInfo, and deviceName are required' });
@@ -44,6 +44,7 @@ const registerDevice = async (req, res) => {
       device.lastOnline = new Date();
       device.deleted = false;
       device.deletedAt = null;
+      if (platform) device.platform = platform;
       await device.save();
     } else {
       device = await Device.create({
@@ -51,6 +52,7 @@ const registerDevice = async (req, res) => {
         userId,
         deviceName,
         osInfo,
+        platform: platform || '',
         lastOnline: new Date(),
       });
     }
@@ -82,9 +84,12 @@ const registerDevice = async (req, res) => {
  * Toggle block state for a device.
  */
 const setDeviceBlock = async (req, res) => {
-  const { deviceId } = req.params;
+  const deviceId = req.params.deviceId || req.body.deviceId;
   const { blocked } = req.body;
 
+  if (!deviceId) {
+    return res.status(400).json({ message: 'deviceId is required' });
+  }
   if (typeof blocked !== 'boolean') {
     return res.status(400).json({ message: 'blocked flag must be boolean' });
   }
@@ -110,7 +115,11 @@ const setDeviceBlock = async (req, res) => {
  * Soft delete a device record.
  */
 const softDeleteDevice = async (req, res) => {
-  const { deviceId } = req.params;
+  const deviceId = req.params.deviceId || req.body.deviceId;
+
+  if (!deviceId) {
+    return res.status(400).json({ message: 'deviceId is required' });
+  }
 
   try {
     const device = await Device.findOne({ deviceId });

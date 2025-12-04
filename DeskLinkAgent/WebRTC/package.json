@@ -1,0 +1,15 @@
+{
+  "name": "desklink-agent-webrtc-helper",
+  "version": "1.0.0",
+  "description": "Node.js WebRTC helper for DeskLink Agent",
+  "main": "NodeHelper.js",
+  "scripts": {
+    "start": "node NodeHelper.js"
+  },
+  "dependencies": {
+    "socket.io-client": "^4.7.5",
+    "wrtc": "^0.4.7",
+    "robotjs": "^0.6.0",
+    "screenshot-desktop": "^1.15.0"
+  }
+}

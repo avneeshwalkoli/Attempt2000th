@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import SavedDevicesPanel from '../components/SavedDevicesPanel.jsx';
 import ConnectDeviceCard from '../components/ConnectDeviceCard.jsx';
 import AccessRequestModal from '../components/AccessRequestModal.jsx';
@@ -13,6 +14,7 @@ import {
 } from '../utils/nativeBridge.js';
 
 export default function DeskLinkPage() {
+  const navigate = useNavigate();
   const { user, token } = useAuth();
   const [search, setSearch] = useState('');
   const [contacts, setContacts] = useState([]);
@@ -67,10 +69,8 @@ export default function DeskLinkPage() {
       setShowWaitingModal(false);
 
       if (payload.status === 'accepted') {
-        startRemoteClientSession({
-          sessionId: payload.sessionId,
-          receiverDeviceId: payload.receiverDeviceId,
-        });
+        // Navigate to viewer page
+        navigate(`/workspace/desklink/viewer?sessionId=${payload.sessionId}&remoteDeviceId=${payload.receiverDeviceId}`);
       } else if (payload.status === 'rejected') {
         window.alert('Remote user rejected the DeskLink request.');
       }

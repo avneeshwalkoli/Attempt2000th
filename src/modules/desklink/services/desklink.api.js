@@ -68,6 +68,27 @@ export const desklinkApi = {
     });
     return parseJSON(res);
   },
+
+  async completeRemote(token, payload) {
+    const res = await fetch(`${API_BASE}/remote/complete`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    });
+    return parseJSON(res);
+  },
+
+  async getTurnToken(token) {
+    const res = await fetch(`${API_BASE}/remote/turn-token`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    return parseJSON(res);
+  },
 };
 
 

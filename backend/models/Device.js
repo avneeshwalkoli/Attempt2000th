@@ -26,6 +26,12 @@ const deviceSchema = new mongoose.Schema(
       trim: true,
       maxlength: 200,
     },
+    platform: {
+      type: String,
+      trim: true,
+      maxlength: 60,
+      default: '',
+    },
     lastOnline: {
       type: Date,
       default: Date.now,

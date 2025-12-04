@@ -8,10 +8,15 @@ const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
 const User = require('./models/User');
 const Message = require('./models/Message');
+const RemoteSession = require('./models/RemoteSession');
+const { verifySessionToken } = require('./utils/sessionToken');
 
 let ioInstance = null;
 const onlineUsersByPhone = new Map(); // Map<phoneString, Set<socketId>>
 const onlineUsersById = new Map(); // Map<userId, Set<socketId>>
+const onlineDevicesById = new Map(); // Map<deviceId, Set<socketId>>
+const pendingSignalsByDevice = new Map(); // Map<deviceId, Array<{event,payload}>>
+const metrics = { activeSessions: 0, offersRelayed: 0, iceFailures: 0, datachannelMsgs: 0 };
 
 function trackUserSocket(map, key, socketId) {
   if (!key) return;
@@ -40,6 +45,31 @@ function emitToUser(userId, event, payload) {
       target.emit(event, payload);
     }
   });
+}
+
+function emitToDevice(deviceId, event, payload) {
+  if (!ioInstance || !deviceId) return;
+  const sockets = onlineDevicesById.get(String(deviceId));
+  if (!sockets) return;
+  sockets.forEach((socketId) => {
+    const target = ioInstance.sockets.sockets.get(socketId);
+    if (target) {
+      target.emit(event, payload);
+    }
+  });
+}
+
+function queueSignal(deviceId, event, payload) {
+  if (!pendingSignalsByDevice.has(String(deviceId))) pendingSignalsByDevice.set(String(deviceId), []);
+  pendingSignalsByDevice.get(String(deviceId)).push({ event, payload, ts: Date.now() });
+}
+
+async function validateSessionAccess(sessionId, userId) {
+  if (!sessionId || !userId) return null;
+  const session = await RemoteSession.findOne({ sessionId });
+  if (!session) return null;
+  if (String(session.callerUserId) !== String(userId) && String(session.receiverUserId) !== String(userId)) return null;
+  return session;
 }
 
 function createSocketServer(server, clientOrigin) {
@@ -85,6 +115,24 @@ function createSocketServer(server, clientOrigin) {
 
     trackUserSocket(onlineUsersByPhone, socket.userPhone, socket.id);
     trackUserSocket(onlineUsersById, socket.userId, socket.id);
+
+    // Optional DeskLink registration: allow clients/devices to register their deviceId
+    socket.on('register', ({ deviceId }) => {
+      if (!deviceId) return;
+      socket.data.deviceId = String(deviceId);
+      const devId = String(deviceId);
+      trackUserSocket(onlineDevicesById, devId, socket.id);
+      // flush pending signals to this device if any
+      const pending = pendingSignalsByDevice.get(devId);
+      if (pending && pending.length > 0) {
+        for (const sig of pending) {
+          try { socket.emit(sig.event, sig.payload); } catch (e) { /* ignore */ }
+        }
+        pendingSignalsByDevice.delete(devId);
+      }
+    });
+
+    //
 
     /**
      * ======================
@@ -308,11 +356,196 @@ function createSocketServer(server, clientOrigin) {
       }, 1000);
     });
 
+    /**
+     * ======================
+     * WebRTC Signaling for Remote Desktop
+     * ======================
+     */
+
+    // WebRTC Offer
+    socket.on('webrtc-offer', async ({ sessionId, fromUserId, fromDeviceId, toDeviceId, sdp, token }) => {
+      try {
+        // Verify session token
+        if (token) {
+          const decoded = verifySessionToken(token);
+          if (decoded.sessionId !== sessionId) {
+            console.error('[webrtc-offer] Session ID mismatch');
+            return;
+          }
+        }
+
+        // Validate session ownership
+        const session = await validateSessionAccess(sessionId, fromUserId);
+        if (!session) {
+          console.error('[webrtc-offer] Invalid session or unauthorized');
+          return;
+        }
+
+        if (session.status !== 'accepted') {
+          console.error('[webrtc-offer] Session not in accepted state');
+          return;
+        }
+
+        metrics.offersRelayed++;
+
+        // Log signaling event
+        console.log(`[webrtc-offer] ${sessionId} from ${fromDeviceId} to ${toDeviceId}`);
+
+        // Relay to target device
+        emitToDevice(toDeviceId, 'webrtc-offer', {
+          sessionId,
+          fromUserId,
+          fromDeviceId,
+          sdp,
+        });
+
+        // Queue if device offline
+        if (!onlineDevicesById.has(String(toDeviceId))) {
+          queueSignal(toDeviceId, 'webrtc-offer', { sessionId, fromUserId, fromDeviceId, sdp });
+        }
+      } catch (err) {
+        console.error('[webrtc-offer] error:', err.message);
+      }
+    });
+
+    // WebRTC Answer
+    socket.on('webrtc-answer', async ({ sessionId, fromUserId, fromDeviceId, toDeviceId, sdp, token }) => {
+      try {
+        if (token) {
+          const decoded = verifySessionToken(token);
+          if (decoded.sessionId !== sessionId) {
+            console.error('[webrtc-answer] Session ID mismatch');
+            return;
+          }
+        }
+
+        const session = await validateSessionAccess(sessionId, fromUserId);
+        if (!session) {
+          console.error('[webrtc-answer] Invalid session or unauthorized');
+          return;
+        }
+
+        console.log(`[webrtc-answer] ${sessionId} from ${fromDeviceId} to ${toDeviceId}`);
+
+        emitToDevice(toDeviceId, 'webrtc-answer', {
+          sessionId,
+          fromUserId,
+          fromDeviceId,
+          sdp,
+        });
+
+        if (!onlineDevicesById.has(String(toDeviceId))) {
+          queueSignal(toDeviceId, 'webrtc-answer', { sessionId, fromUserId, fromDeviceId, sdp });
+        }
+      } catch (err) {
+        console.error('[webrtc-answer] error:', err.message);
+      }
+    });
+
+    // WebRTC ICE Candidate
+    socket.on('webrtc-ice', async ({ sessionId, fromUserId, fromDeviceId, toDeviceId, candidate, token }) => {
+      try {
+        if (token) {
+          const decoded = verifySessionToken(token);
+          if (decoded.sessionId !== sessionId) {
+            return;
+          }
+        }
+
+        const session = await validateSessionAccess(sessionId, fromUserId);
+        if (!session) {
+          metrics.iceFailures++;
+          return;
+        }
+
+        emitToDevice(toDeviceId, 'webrtc-ice', {
+          sessionId,
+          fromUserId,
+          fromDeviceId,
+          candidate,
+        });
+
+        if (!onlineDevicesById.has(String(toDeviceId))) {
+          queueSignal(toDeviceId, 'webrtc-ice', { sessionId, fromUserId, fromDeviceId, candidate });
+        }
+      } catch (err) {
+        console.error('[webrtc-ice] error:', err.message);
+        metrics.iceFailures++;
+      }
+    });
+
+    // WebRTC Cancel
+    socket.on('webrtc-cancel', async ({ sessionId, fromUserId }) => {
+      try {
+        const session = await validateSessionAccess(sessionId, fromUserId);
+        if (!session) {
+          return;
+        }
+
+        console.log(`[webrtc-cancel] ${sessionId}`);
+
+        // Notify both parties
+        emitToUser(session.callerUserId, 'webrtc-cancel', { sessionId });
+        emitToUser(session.receiverUserId, 'webrtc-cancel', { sessionId });
+
+        // Update session
+        session.status = 'ended';
+        session.endedAt = new Date();
+        session.audit.push({
+          event: 'cancelled',
+          userId: fromUserId,
+          details: {},
+        });
+        await session.save();
+
+        if (metrics.activeSessions > 0) {
+          metrics.activeSessions--;
+        }
+      } catch (err) {
+        console.error('[webrtc-cancel] error:', err.message);
+      }
+    });
+
+    // DataChannel control messages (fallback if datachannel unavailable)
+    socket.on('desklink-control', async ({ sessionId, fromUserId, message, token }) => {
+      try {
+        if (token) {
+          const decoded = verifySessionToken(token);
+          if (decoded.sessionId !== sessionId) {
+            return;
+          }
+        }
+
+        const session = await validateSessionAccess(sessionId, fromUserId);
+        if (!session) {
+          return;
+        }
+
+        metrics.datachannelMsgs++;
+
+        // Relay to receiver device
+        const targetDeviceId = String(fromUserId) === String(session.callerUserId)
+          ? session.receiverDeviceId
+          : session.callerDeviceId;
+
+        emitToDevice(targetDeviceId, 'desklink-control', {
+          sessionId,
+          fromUserId,
+          message,
+        });
+      } catch (err) {
+        console.error('[desklink-control] error:', err.message);
+      }
+    });
+
     // User left (generic disconnect)
     socket.on('disconnect', () => {
       // Clean up online users map for chat
       untrackUserSocket(onlineUsersByPhone, socket.userPhone, socket.id);
       untrackUserSocket(onlineUsersById, socket.userId, socket.id);
+      if (socket.data && socket.data.deviceId) {
+        untrackUserSocket(onlineDevicesById, socket.data.deviceId, socket.id);
+      }
 
       const { roomId, userId } = socket.data;
       if (roomId && userId) {
@@ -338,4 +571,8 @@ function createSocketServer(server, clientOrigin) {
   return io;
 }
 
-module.exports = { createSocketServer, emitToUser };
+function getMetrics() {
+  return { ...metrics };
+}
+
+module.exports = { createSocketServer, emitToUser, emitToDevice, getMetrics };

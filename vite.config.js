@@ -11,4 +11,10 @@ export default defineConfig({
       '@components': fileURLToPath(new URL('./components', import.meta.url)),
     },
   },
+  server: {
+    host: '0.0.0.0',
+    allowedHosts: [
+      'alexandria-collar-separation-experimental.trycloudflare.com',
+    ],
+  },
 });
