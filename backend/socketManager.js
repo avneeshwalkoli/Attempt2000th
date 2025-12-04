@@ -1,9 +1,46 @@
 /**
- * Socket.IO Signaling Server for WebRTC
- * Handles all WebRTC signaling events
+ * Socket.IO Server
+ * - WebRTC signaling for Meet
+ * - Realtime private messaging for ChatSpace
  */
 
 const { Server } = require('socket.io');
+const jwt = require('jsonwebtoken');
+const User = require('./models/User');
+const Message = require('./models/Message');
+
+let ioInstance = null;
+const onlineUsersByPhone = new Map(); // Map<phoneString, Set<socketId>>
+const onlineUsersById = new Map(); // Map<userId, Set<socketId>>
+
+function trackUserSocket(map, key, socketId) {
+  if (!key) return;
+  if (!map.has(key)) {
+    map.set(key, new Set());
+  }
+  map.get(key).add(socketId);
+}
+
+function untrackUserSocket(map, key, socketId) {
+  if (!key || !map.has(key)) return;
+  const set = map.get(key);
+  set.delete(socketId);
+  if (set.size === 0) {
+    map.delete(key);
+  }
+}
+
+function emitToUser(userId, event, payload) {
+  if (!ioInstance || !userId) return;
+  const sockets = onlineUsersById.get(String(userId));
+  if (!sockets) return;
+  sockets.forEach((socketId) => {
+    const target = ioInstance.sockets.sockets.get(socketId);
+    if (target) {
+      target.emit(event, payload);
+    }
+  });
+}
 
 function createSocketServer(server, clientOrigin) {
   const io = new Server(server, {
@@ -14,11 +51,93 @@ function createSocketServer(server, clientOrigin) {
     },
   });
 
-  // Store room data
+  ioInstance = io;
+
+  // Store room data for meetings
   const rooms = new Map(); // Map<roomId, Map<userId, {socketId, userName, isHost}>>
 
+  // Authenticate socket connections using the same JWT as HTTP routes
+  io.use(async (socket, next) => {
+    try {
+      const token = socket.handshake.auth && socket.handshake.auth.token;
+      if (!token) {
+        return next(new Error('Not authorized, no token'));
+      }
+
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const user = await User.findById(decoded.id).select('-password');
+      if (!user) {
+        return next(new Error('Not authorized, user not found'));
+      }
+
+      socket.user = user;
+      socket.userPhone = `${user.countryCode} ${user.phoneNumber}`;
+      socket.userId = String(user._id);
+      return next();
+    } catch (err) {
+      console.error('[socket] auth error', err.message);
+      return next(new Error('Not authorized, token failed'));
+    }
+  });
+
   io.on('connection', (socket) => {
-    console.log('User connected:', socket.id);
+    console.log('User connected:', socket.id, socket.userPhone);
+
+    trackUserSocket(onlineUsersByPhone, socket.userPhone, socket.id);
+    trackUserSocket(onlineUsersById, socket.userId, socket.id);
+
+    /**
+     * ======================
+     * Realtime Chat Messaging
+     * ======================
+     *
+     * Frontend emits: 'private-message' with { to, text }
+     * - `to` is the full phone string "CC PHONE"
+     * - We persist the message in MongoDB
+     * - Then emit the saved message to both sender and receiver
+     */
+    socket.on('private-message', async ({ to, text }) => {
+      try {
+        if (!text || !String(text).trim()) {
+          return;
+        }
+
+        const senderPhone = socket.userPhone;
+        const receiverPhone = String(to || '').trim();
+
+        if (!receiverPhone) {
+          return;
+        }
+
+        const msgDoc = await Message.create({
+          senderPhone,
+          receiverPhone,
+          text: String(text).trim(),
+        });
+
+        const msg = msgDoc.toObject();
+
+        // Send back to sender (so it appears immediately in their chat)
+        socket.emit('private-message', msg);
+
+        // Deliver to all connected sockets of the receiver
+        const receiverSockets = onlineUsersByPhone.get(receiverPhone);
+        if (receiverSockets && receiverSockets.size > 0) {
+          for (const socketId of receiverSockets) {
+            const target = io.sockets.sockets.get(socketId);
+            if (target) {
+              target.emit('private-message', msg);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('[socket] private-message error', err);
+      }
+    });
+
+    // ======================
+    // WebRTC Meet Signaling
+    // ======================
 
     // User joined room
     socket.on('user-joined', ({ roomId, userId, userName, isHost }) => {
@@ -189,8 +308,12 @@ function createSocketServer(server, clientOrigin) {
       }, 1000);
     });
 
-    // User left
+    // User left (generic disconnect)
     socket.on('disconnect', () => {
+      // Clean up online users map for chat
+      untrackUserSocket(onlineUsersByPhone, socket.userPhone, socket.id);
+      untrackUserSocket(onlineUsersById, socket.userId, socket.id);
+
       const { roomId, userId } = socket.data;
       if (roomId && userId) {
         // Remove from room
@@ -215,4 +338,4 @@ function createSocketServer(server, clientOrigin) {
   return io;
 }
 
-module.exports = { createSocketServer };
+module.exports = { createSocketServer, emitToUser };

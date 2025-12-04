@@ -8,6 +8,9 @@ const connectDB = require('./config/db');
 const authRoutes = require('./routes/authRoutes');
 const contactsRoutes = require('./routes/contactsRoutes');
 const messagingRoutes = require('./routes/messagingRoutes');
+const deviceRoutes = require('./routes/deviceRoutes');
+const contactLinkRoutes = require('./routes/contactLinkRoutes');
+const remoteRoutes = require('./routes/remoteRoutes');
 const { createSocketServer } = require('./socketManager');
 
 // Load environment variables
@@ -34,6 +37,9 @@ app.use(express.json());
 app.use('/api/auth', authRoutes);
 app.use('/api/contacts', contactsRoutes);
 app.use('/api/messages', messagingRoutes);
+app.use('/api/device', deviceRoutes);
+app.use('/api/contact-links', contactLinkRoutes);
+app.use('/api/remote', remoteRoutes);
 
 // Create HTTP server and attach Socket.IO
 const server = http.createServer(app);

@@ -2,6 +2,7 @@ import React from 'react';
 import { Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
 import Messages from './modules/chatspace/pages/Messages.jsx';
 import Meet from './modules/meetspace/pages/Meet.jsx';
+import DeskLinkPage from './modules/desklink/pages/DeskLinkPage.jsx';
 // --- AUTH IMPORTS ---
 import Welcome from './modules/auth/pages/Welcome.jsx'; // 💡 Make sure this path is correct!
 import Login from './modules/auth/pages/Login.jsx';
@@ -47,6 +48,7 @@ export default function App() {
         <Route element={<AuthGuard />}>
           <Route path="/workspace/messages" element={<Messages />} />
           <Route path="/workspace/meet" element={<Meet />} />
+          <Route path="/workspace/desklink" element={<DeskLinkPage />} />
           {/* Optional: Redirect from base /workspace to a default page */}
           <Route path="/workspace" element={<Navigate to="/workspace/messages" replace />} />
         </Route>

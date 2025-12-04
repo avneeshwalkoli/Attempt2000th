@@ -6,6 +6,7 @@ import { CiSettings } from "react-icons/ci";
 import { FaRegStar } from "react-icons/fa";
 import { IoMdContacts } from "react-icons/io";
 import { IoIosLogOut } from "react-icons/io";
+import DeskLinkSidebarEntry from '../../desklink/components/DeskLinkSidebarEntry.jsx';
 
 const navItems = [
   { id: 'messages', label: 'Messages', icon: <FaRegMessage /> , path: '/workspace/messages' },
@@ -50,6 +51,9 @@ export default function SidebarShell() {
               </button>
             );
           })}
+
+          {/* DeskLink entry */}
+          <DeskLinkSidebarEntry />
         </div>
       </div>
 

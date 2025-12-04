@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "dgSpecHash": "qKjAHMmDa8Y=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\yasha\\OneDrive\\Desktop\\parattttt\\VisionDesk__2.0\\DeskLinkAgent\\DeskLinkAgent.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\yasha\\.nuget\\packages\\system.codedom\\7.0.0\\system.codedom.7.0.0.nupkg.sha512",
+    "C:\\Users\\yasha\\.nuget\\packages\\system.management\\7.0.2\\system.management.7.0.2.nupkg.sha512"
+  ],
+  "logs": []
+}

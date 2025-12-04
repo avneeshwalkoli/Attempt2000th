@@ -37,6 +37,30 @@ const userSchema = new mongoose.Schema(
       minlength: 6,
       select: false,
     },
+    devices: [
+      {
+        type: String,
+        trim: true,
+      },
+    ],
+    contacts: [
+      {
+        contactUserId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
+          required: true,
+        },
+        savedName: {
+          type: String,
+          trim: true,
+          maxlength: 120,
+        },
+        contactDeviceId: {
+          type: String,
+          trim: true,
+        },
+      },
+    ],
     createdAt: {
       type: Date,
       default: Date.now,
