@@ -27,18 +27,24 @@ const ensureDeviceOwnership = async (deviceId, userId) => {
 const lastRequestAt = new Map();
 
 const requestRemoteSession = async (req, res) => {
-  const { fromUserId, fromDeviceId, toUserId } = req.body;
+  const { fromUserId, fromDeviceId, toUserId, toDeviceId } = req.body;
 
-  if (!fromUserId || !fromDeviceId || !toUserId) {
-    return res.status(400).json({ message: 'fromUserId, fromDeviceId, and toUserId are required' });
+  if (!fromUserId || !fromDeviceId) {
+    return res
+      .status(400)
+      .json({ message: 'fromUserId and fromDeviceId are required' });
+  }
+
+  if (!toUserId && !toDeviceId) {
+    return res
+      .status(400)
+      .json({ message: 'Either toUserId or toDeviceId is required' });
   }
 
   if (String(req.user._id) !== String(fromUserId)) {
-    return res.status(403).json({ message: 'Forbidden: mismatched user context' });
-  }
-
-  if (String(fromUserId) === String(toUserId)) {
-    return res.status(400).json({ message: 'Cannot start a session with yourself' });
+    return res
+      .status(403)
+      .json({ message: 'Forbidden: mismatched user context' });
   }
 
   try {
@@ -51,41 +57,68 @@ const requestRemoteSession = async (req, res) => {
 
     await ensureDeviceOwnership(fromDeviceId, fromUserId);
 
-    let receiverDevice = await ContactLink.findOne({
-      ownerUserId: fromUserId,
-      contactUserId: toUserId,
-      blocked: false,
-    });
+    let effectiveToUserId = toUserId;
+    let receiverDevice;
 
-    if (receiverDevice) {
+    if (toDeviceId) {
       receiverDevice = await Device.findOne({
-        deviceId: receiverDevice.contactDeviceId,
+        deviceId: toDeviceId,
         deleted: false,
         blocked: false,
       });
+
+      if (!receiverDevice) {
+        return res
+          .status(404)
+          .json({ message: 'Receiver device not found or offline' });
+      }
+
+      effectiveToUserId = receiverDevice.userId;
     } else {
-      receiverDevice = await Device.findOne({
-        userId: toUserId,
-        deleted: false,
+      receiverDevice = await ContactLink.findOne({
+        ownerUserId: fromUserId,
+        contactUserId: toUserId,
         blocked: false,
-      }).sort({ lastOnline: -1 });
+      });
+
+      if (receiverDevice) {
+        receiverDevice = await Device.findOne({
+          deviceId: receiverDevice.contactDeviceId,
+          deleted: false,
+          blocked: false,
+        });
+      } else {
+        receiverDevice = await Device.findOne({
+          userId: toUserId,
+          deleted: false,
+          blocked: false,
+        }).sort({ lastOnline: -1 });
+      }
+
+      if (!receiverDevice) {
+        return res
+          .status(404)
+          .json({ message: 'Receiver device not found or offline' });
+      }
     }
 
-    if (!receiverDevice) {
-      return res.status(404).json({ message: 'Receiver device not found or offline' });
+    if (String(fromUserId) === String(effectiveToUserId)) {
+      return res
+        .status(400)
+        .json({ message: 'Cannot start a session with yourself' });
     }
 
     const session = await RemoteSession.create({
       sessionId: new mongoose.Types.ObjectId().toString(),
       callerUserId: fromUserId,
-      receiverUserId: toUserId,
+      receiverUserId: effectiveToUserId,
       callerDeviceId: fromDeviceId,
       receiverDeviceId: receiverDevice.deviceId,
       status: 'pending',
       startedAt: new Date(),
     });
 
-    emitToUser(toUserId, 'desklink-remote-request', {
+    emitToUser(effectiveToUserId, 'desklink-remote-request', {
       sessionId: session.sessionId,
       fromUserId,
       fromDeviceId,
@@ -93,7 +126,7 @@ const requestRemoteSession = async (req, res) => {
       receiverDeviceId: session.receiverDeviceId,
     });
     // Also emit aliased event names per Part 2 spec
-    emitToUser(toUserId, 'desklink-remote-request', {
+    emitToUser(effectiveToUserId, 'desklink-remote-request', {
       sessionId: session.sessionId,
       fromUserId,
       fromDeviceId,

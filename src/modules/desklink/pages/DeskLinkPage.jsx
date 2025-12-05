@@ -7,6 +7,7 @@ import IncomingRequestModal from '../components/IncomingRequestModal.jsx';
 import { useAuth } from '../../auth/hooks/useAuth.js';
 import { desklinkApi } from '../services/desklink.api.js';
 import { useDeskLinkSocket } from '../hooks/useDeskLinkSocket.js';
+import SidebarShell from '../../chatspace/components/SidebarShell.jsx';
 import {
   getNativeDeviceId,
   startRemoteClientSession,
@@ -123,16 +124,26 @@ export default function DeskLinkPage() {
     sendRemoteRequest(contact);
   };
 
-  const handleManualRequest = (deviceIdFromInput) => {
+  const handleManualRequest = async (deviceIdFromInput) => {
     const target = (deviceIdFromInput || '').trim();
     if (!target) return;
-    const match = contacts.find(
-      (c) => c.contactDeviceId.toLowerCase() === target.toLowerCase()
-    );
-    if (match) {
-      handleSelectContact(match);
-    } else {
-      window.alert('Unknown DeskLink ID. Save the contact first.');
+    if (!localDeviceId || !user) {
+      window.alert('Missing device ID or user context.');
+      return;
+    }
+
+    try {
+      setShowWaitingModal(true);
+      const { session } = await desklinkApi.requestRemote(token, {
+        fromUserId: user._id || user.id,
+        fromDeviceId: localDeviceId,
+        toDeviceId: target,
+      });
+      setPendingSession(session);
+    } catch (err) {
+      console.error('DeskLink manual request failed', err);
+      setShowWaitingModal(false);
+      window.alert(err.message || 'Unable to start remote session');
     }
   };
 
@@ -168,48 +179,52 @@ export default function DeskLinkPage() {
   };
 
   return (
-    <div className="min-h-screen w-full bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-50 flex items-stretch justify-center">
-      <div className="mx-auto w-full max-w-6xl px-4 py-8 lg:py-10 flex flex-col lg:flex-row gap-6 lg:gap-8">
-        <div className="w-full lg:max-w-sm">
-          <SavedDevicesPanel
-            contacts={filteredContacts}
-            search={search}
-            onSearchChange={setSearch}
-            selectedId={selectedContactId}
-            onSelectContact={handleSelectContact}
-          />
+    <div className="min-h-screen flex bg-slate-950 text-slate-50 w-full">
+      <SidebarShell />
+
+      <main className="flex-1 flex items-stretch justify-center">
+        <div className="mx-auto w-full max-w-6xl px-4 py-8 lg:py-10 flex flex-col lg:flex-row gap-6 lg:gap-8">
+          <div className="w-full lg:max-w-sm">
+            <SavedDevicesPanel
+              contacts={filteredContacts}
+              search={search}
+              onSearchChange={setSearch}
+              selectedId={selectedContactId}
+              onSelectContact={handleSelectContact}
+            />
+          </div>
+
+          <div className="flex-1 flex items-center justify-center">
+            <ConnectDeviceCard
+              initialDeviceId={
+                contacts.find((c) => c.id === selectedContactId)?.contactDeviceId || ''
+              }
+              onRequestAccess={handleManualRequest}
+            />
+          </div>
         </div>
 
-        <div className="flex-1 flex items-center justify-center">
-          <ConnectDeviceCard
-            initialDeviceId={
-              contacts.find((c) => c.id === selectedContactId)?.contactDeviceId || ''
-            }
-            onRequestAccess={handleManualRequest}
+        {showWaitingModal && pendingSession && (
+          <AccessRequestModal
+            deviceId={pendingSession.receiverDeviceId}
+            title="Request Sent"
+            description="Waiting for the remote user to accept…"
+            onClose={() => {
+              setShowWaitingModal(false);
+              setPendingSession(null);
+            }}
           />
-        </div>
-      </div>
+        )}
 
-      {showWaitingModal && pendingSession && (
-        <AccessRequestModal
-          deviceId={pendingSession.receiverDeviceId}
-          title="Request Sent"
-          description="Waiting for the remote user to accept…"
-          onClose={() => {
-            setShowWaitingModal(false);
-            setPendingSession(null);
-          }}
-        />
-      )}
-
-      {incomingRequest && (
-        <IncomingRequestModal
-          requesterName={incomingRequest.callerName}
-          deviceLabel={incomingRequest.fromDeviceId}
-          onAccept={handleAcceptIncoming}
-          onReject={handleRejectIncoming}
-        />
-      )}
+        {incomingRequest && (
+          <IncomingRequestModal
+            requesterName={incomingRequest.callerName}
+            deviceLabel={incomingRequest.fromDeviceId}
+            onAccept={handleAcceptIncoming}
+            onReject={handleRejectIncoming}
+          />
+        )}
+      </main>
     </div>
   );
 }
