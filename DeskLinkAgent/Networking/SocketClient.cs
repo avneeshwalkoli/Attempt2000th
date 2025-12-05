@@ -14,6 +14,7 @@ public class SocketClient : IAsyncDisposable
     private readonly AgentIpcServer _ipc;
     private SocketIOClient.SocketIO? _client;
     private WebRTCLauncher? _webrtcLauncher;
+    private string? _agentJwt;
 
     public SocketClient(string deviceId, AgentIpcServer ipc)
     {
@@ -25,7 +26,54 @@ public class SocketClient : IAsyncDisposable
     {
         Console.WriteLine($"[Socket] ConnectAsync => serverUrl={serverUrl}");
 
-        var agentSecret = Environment.GetEnvironmentVariable("AGENT_SECRET") ?? "dev-secret";
+        var ownerJwt = Environment.GetEnvironmentVariable("AGENT_OWNER_JWT");
+        if (string.IsNullOrWhiteSpace(ownerJwt))
+        {
+            Console.Error.WriteLine("[Agent] AGENT_OWNER_JWT is not set; cannot provision agent token.");
+            return;
+        }
+
+        // Provision an agent-specific JWT from the backend
+        var provisionUrl = serverUrl.TrimEnd('/') + "/api/agent/provision";
+        string agentJwt;
+        string ownerUserId;
+
+        try
+        {
+            using var http = new System.Net.Http.HttpClient();
+            http.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", ownerJwt);
+
+            var resp = await http.PostAsync(provisionUrl, new System.Net.Http.StringContent("{}", System.Text.Encoding.UTF8, "application/json"));
+            var body = await resp.Content.ReadAsStringAsync();
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                Console.Error.WriteLine($"[Agent] Provision failed ({(int)resp.StatusCode}): {body}");
+                return;
+            }
+
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            agentJwt = root.GetProperty("agentJwt").GetString() ?? string.Empty;
+            ownerUserId = root.GetProperty("ownerUserId").GetString() ?? string.Empty;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine("[Agent] Provision exception: " + ex);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(agentJwt))
+        {
+            Console.Error.WriteLine("[Agent] Provision returned empty agentJwt; aborting.");
+            return;
+        }
+
+        Console.WriteLine("[Agent] Provision success for user=" + ownerUserId);
+
+        // Cache agentJwt for use by WebRTC helper
+        _agentJwt = agentJwt;
 
         // Use fully-qualified type to avoid namespace/type ambiguity
         _client = new SocketIOClient.SocketIO(serverUrl, new SocketIOOptions
@@ -33,11 +81,9 @@ public class SocketClient : IAsyncDisposable
             Reconnection = true,
             ReconnectionAttempts = int.MaxValue,
             ReconnectionDelay = 2000,
-            // Auth must be a dictionary for this client version
             Auth = new Dictionary<string, object>
             {
-                { "agent", "desklink-agent" },
-                { "secret", agentSecret }
+                { "token", agentJwt }
             }
         });
 
@@ -46,14 +92,10 @@ public class SocketClient : IAsyncDisposable
         {
             Console.WriteLine("[Socket] connected ✓");
 
-            // Register device so server maps deviceId -> socketId
+            // Register device so server maps deviceId -> socketId and persists it
             await Emit("register", new { deviceId = _deviceId });
 
-            // Backward compatibility events
-            await Emit("agent-auth", new { deviceId = _deviceId });
-            await Emit("agent-status", new { status = "online", deviceId = _deviceId });
-
-            Console.WriteLine("[Socket] register + auth emitted ✓");
+            Console.WriteLine("[Socket] register emitted ✓");
         };
 
         // Disconnected handler
@@ -146,6 +188,12 @@ public class SocketClient : IAsyncDisposable
 
             var remoteDeviceId = role == "receiver" ? callerDeviceId : receiverDeviceId;
 
+            if (string.IsNullOrWhiteSpace(_agentJwt))
+            {
+                Console.Error.WriteLine("[Socket] Cannot start WebRTC: missing agentJwt.");
+                return;
+            }
+
             _webrtcLauncher = new WebRTCLauncher(
                 sessionId,
                 token,
@@ -153,7 +201,8 @@ public class SocketClient : IAsyncDisposable
                 "agent-user-id", // TODO: replace with real user id
                 remoteDeviceId,
                 role,
-                serverUrl
+                serverUrl,
+                _agentJwt!
             );
 
             _webrtcLauncher.Start();

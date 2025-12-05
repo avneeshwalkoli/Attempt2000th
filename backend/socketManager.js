@@ -87,44 +87,31 @@ function createSocketServer(server, clientOrigin) {
   // Store room data for meetings
   const rooms = new Map(); // Map<roomId, Map<userId, {socketId, userName, isHost}>>
 
-  // Authenticate socket connections using the same JWT as HTTP routes
-  // backend/socketManager.js (replace existing io.use middleware)
-io.use(async (socket, next) => {
-  try {
-    const auth = socket.handshake.auth || {};
-    const agentSecret = process.env.AGENT_SECRET;
+  // Authenticate socket connections using JWT (no shared-secret path)
+  io.use(async (socket, next) => {
+    try {
+      const auth = socket.handshake.auth || {};
+      const token = auth.token;
 
-    // Allow agent connections with shared secret (dev mode)
-    if (auth.agent === 'desklink-agent' && agentSecret && auth.secret === agentSecret) {
-      // mark as agent (no user context)
-      socket.user = null;
-      socket.userId = null;
-      socket.isAgent = true;
-      console.log('[socket] agent connected (shared secret)');
+      if (!token) {
+        return next(new Error('Not authorized, no token'));
+      }
+
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const user = await User.findById(decoded.id).select('-password');
+      if (!user) {
+        return next(new Error('Not authorized, user not found'));
+      }
+
+      socket.user = user;
+      socket.userPhone = `${user.countryCode} ${user.phoneNumber}`;
+      socket.userId = String(user._id);
       return next();
+    } catch (err) {
+      console.error('[socket] auth error', err && err.message);
+      return next(new Error('Not authorized, token failed'));
     }
-
-    // Normal browser client JWT flow
-    const token = auth.token;
-    if (!token) {
-      return next(new Error('Not authorized, no token'));
-    }
-
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findById(decoded.id).select('-password');
-    if (!user) {
-      return next(new Error('Not authorized, user not found'));
-    }
-
-    socket.user = user;
-    socket.userPhone = `${user.countryCode} ${user.phoneNumber}`;
-    socket.userId = String(user._id);
-    return next();
-  } catch (err) {
-    console.error('[socket] auth error', err && err.message);
-    return next(new Error('Not authorized, token failed'));
-  }
-});
+  });
 
 
   io.on('connection', (socket) => {
@@ -133,8 +120,8 @@ io.use(async (socket, next) => {
     trackUserSocket(onlineUsersByPhone, socket.userPhone, socket.id);
     trackUserSocket(onlineUsersById, socket.userId, socket.id);
 
-    // DeskLink registration: allow clients/devices to register their deviceId
-    // and ensure the device is persisted in MongoDB for remote sessions.
+    // DeskLink registration: clients/devices register their deviceId
+    // and we persist the device in MongoDB owned by socket.userId.
     socket.on('register', async ({ deviceId, platform, label, osInfo, deviceName }) => {
       try {
         if (!deviceId) return;
@@ -151,6 +138,7 @@ io.use(async (socket, next) => {
 
         if (!userId) {
           console.warn('[device] register called without authenticated user for deviceId=', devId);
+          return;
         }
 
         await Device.updateOne(

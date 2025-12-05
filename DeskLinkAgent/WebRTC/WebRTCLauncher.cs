@@ -17,26 +17,29 @@ public class WebRTCLauncher : IDisposable
     private readonly string _remoteDeviceId;
     private readonly string _role;
     private readonly string _serverUrl;
+    private readonly string _agentJwt;
 
-   public WebRTCLauncher(
-    string sessionId,
-    string token,
-    string deviceId,
-    string userId,
-    string remoteDeviceId,
-    string role,
-    string serverUrl = "https://anydesk.onrender.com")
-{
-    _sessionId = sessionId;
-    _token = token;
-    _deviceId = deviceId;
-    _userId = userId;
-    _remoteDeviceId = remoteDeviceId;
-    _role = role;
-    _serverUrl = serverUrl ?? "https://anydesk.onrender.com";
+    public WebRTCLauncher(
+        string sessionId,
+        string token,
+        string deviceId,
+        string userId,
+        string remoteDeviceId,
+        string role,
+        string serverUrl,
+        string agentJwt)
+    {
+        _sessionId = sessionId;
+        _token = token;
+        _deviceId = deviceId;
+        _userId = userId;
+        _remoteDeviceId = remoteDeviceId;
+        _role = role;
+        _serverUrl = serverUrl ?? "https://anydesk.onrender.com";
+        _agentJwt = agentJwt;
 
-    Console.WriteLine($"[WebRTC] launcher created — session={sessionId} role={role} serverUrl={_serverUrl}");
-}
+        Console.WriteLine($"[WebRTC] launcher created — session={sessionId} role={role} serverUrl={_serverUrl}");
+    }
 
 
     public void Start()
@@ -57,7 +60,7 @@ public class WebRTCLauncher : IDisposable
             var startInfo = new ProcessStartInfo
             {
                 FileName = "node",
-                Arguments = $"\"{helperPath}\" \"{_serverUrl}\" \"{_sessionId}\" \"{_token}\" \"{_deviceId}\" \"{_userId}\" \"{_remoteDeviceId}\" \"{_role}\"",
+                Arguments = $"\"{helperPath}\" \"{_serverUrl}\" \"{_sessionId}\" \"{_token}\" \"{_deviceId}\" \"{_userId}\" \"{_remoteDeviceId}\" \"{_role}\" \"{_agentJwt}\"",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,

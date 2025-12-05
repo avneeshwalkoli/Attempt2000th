@@ -11,6 +11,7 @@ const messagingRoutes = require('./routes/messagingRoutes');
 const deviceRoutes = require('./routes/deviceRoutes');
 const contactLinkRoutes = require('./routes/contactLinkRoutes');
 const remoteRoutes = require('./routes/remoteRoutes');
+const agentProvisionRoutes = require('./routes/agentProvisionRoutes');
 const { createSocketServer } = require('./socketManager');
 
 // Load environment variables
@@ -40,6 +41,7 @@ app.use('/api/messages', messagingRoutes);
 app.use('/api/device', deviceRoutes);
 app.use('/api/contact-links', contactLinkRoutes);
 app.use('/api/remote', remoteRoutes);
+app.use('/api/agent', agentProvisionRoutes);
 
 // Create HTTP server and attach Socket.IO
 const server = http.createServer(app);

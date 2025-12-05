@@ -18,11 +18,12 @@ const args = process.argv.slice(2);
 const config = {
   serverUrl: args[0] || 'https://anydesk.onrender.com',
   sessionId: args[1],
-  token: args[2],
+  token: args[2],             // session token for WebRTC validation
   deviceId: args[3],
   userId: args[4],
   remoteDeviceId: args[5],
   role: args[6] || 'receiver', // 'caller' or 'receiver'
+  agentJwt: args[7],           // JWT for Socket.IO auth
 };
 
 console.error('[NodeHelper] Starting with config:', JSON.stringify(config, null, 2));
@@ -261,14 +262,11 @@ async function getIceServers(serverUrl, sessionToken) {
 }
 
 function initSocket() {
-  // ensure config.serverUrl and config.deviceId exist; config.token may be session token or JWT
   const authPayload = {
-    token: config.token,                    // session token (if available)
-    agent: 'desklink-agent',
-    secret: process.env.AGENT_SECRET || 'dev-secret'
+    token: config.agentJwt,
   };
 
-  console.error('[Socket] initSocket: connecting to', config.serverUrl, 'auth', !!authPayload.token, 'agentSecretPresent', !!authPayload.secret);
+  console.error('[Socket] initSocket: connecting to', config.serverUrl, 'hasAgentJwt', !!config.agentJwt);
 
   socket = io(config.serverUrl, {
     auth: authPayload,
