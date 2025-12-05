@@ -20,17 +20,31 @@ public class SocketClient : IAsyncDisposable
 
     public async Task ConnectAsync(string serverUrl)
     {
-        _client ??= new SocketIOClient.SocketIO(serverUrl, new SocketIOOptions
+        // DEBUG LOG ADDED
+        Console.WriteLine($"[Socket] ConnectAsync called with serverUrl={serverUrl} AGENT_SECRET={Environment.GetEnvironmentVariable("AGENT_SECRET")}");
+
+        // URL LOGIC UPDATED
+        serverUrl = string.IsNullOrWhiteSpace(serverUrl) ? "https://anydesk.onrender.com" : serverUrl;
+
+        // CLIENT INITIALIZATION UPDATED
+        _client ??= new SocketIO(serverUrl, new SocketIOOptions
         {
+            Eio = 4,
             Transport = SocketIOClient.Transport.TransportProtocol.WebSocket,
             Reconnection = true,
             ReconnectionDelay = 2000,
-            ReconnectionAttempts = int.MaxValue
+            ReconnectionAttempts = int.MaxValue,
+            // Auth payload for agent shared secret
+            Auth = new { agent = "desklink-agent", secret = Environment.GetEnvironmentVariable("AGENT_SECRET") ?? "dev-secret" }
         });
 
+        // ONCONNECTED HANDLER UPDATED
         _client.OnConnected += async (sender, e) =>
         {
             Console.WriteLine("[Socket] connected");
+            // Register the deviceId so server maps deviceId -> socketId
+            await Emit("register", new { deviceId = _deviceId });
+            // keep existing agent-auth/status for backwards compatibility
             await Emit("agent-auth", new { deviceId = _deviceId });
             await Emit("agent-status", new { status = "online", deviceId = _deviceId });
         };

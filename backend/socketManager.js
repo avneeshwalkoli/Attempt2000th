@@ -87,28 +87,44 @@ function createSocketServer(server, clientOrigin) {
   const rooms = new Map(); // Map<roomId, Map<userId, {socketId, userName, isHost}>>
 
   // Authenticate socket connections using the same JWT as HTTP routes
-  io.use(async (socket, next) => {
-    try {
-      const token = socket.handshake.auth && socket.handshake.auth.token;
-      if (!token) {
-        return next(new Error('Not authorized, no token'));
-      }
+  // backend/socketManager.js (replace existing io.use middleware)
+io.use(async (socket, next) => {
+  try {
+    const auth = socket.handshake.auth || {};
+    const agentSecret = process.env.AGENT_SECRET;
 
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      const user = await User.findById(decoded.id).select('-password');
-      if (!user) {
-        return next(new Error('Not authorized, user not found'));
-      }
-
-      socket.user = user;
-      socket.userPhone = `${user.countryCode} ${user.phoneNumber}`;
-      socket.userId = String(user._id);
+    // Allow agent connections with shared secret (dev mode)
+    if (auth.agent === 'desklink-agent' && agentSecret && auth.secret === agentSecret) {
+      // mark as agent (no user context)
+      socket.user = null;
+      socket.userId = null;
+      socket.isAgent = true;
+      console.log('[socket] agent connected (shared secret)');
       return next();
-    } catch (err) {
-      console.error('[socket] auth error', err.message);
-      return next(new Error('Not authorized, token failed'));
     }
-  });
+
+    // Normal browser client JWT flow
+    const token = auth.token;
+    if (!token) {
+      return next(new Error('Not authorized, no token'));
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await User.findById(decoded.id).select('-password');
+    if (!user) {
+      return next(new Error('Not authorized, user not found'));
+    }
+
+    socket.user = user;
+    socket.userPhone = `${user.countryCode} ${user.phoneNumber}`;
+    socket.userId = String(user._id);
+    return next();
+  } catch (err) {
+    console.error('[socket] auth error', err && err.message);
+    return next(new Error('Not authorized, token failed'));
+  }
+});
+
 
   io.on('connection', (socket) => {
     console.log('User connected:', socket.id, socket.userPhone);

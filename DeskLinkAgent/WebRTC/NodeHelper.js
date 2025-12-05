@@ -9,13 +9,14 @@
 
 const { RTCPeerConnection, RTCSessionDescription, RTCIceCandidate } = require('wrtc');
 const io = require('socket.io-client');
+const fetch = require('node-fetch');
 const robot = require('robotjs');
 const screenshot = require('screenshot-desktop');
 
 // Configuration from command line args
 const args = process.argv.slice(2);
 const config = {
-  serverUrl: args[0] || 'http://localhost:5000',
+  serverUrl: args[0] || 'https://anydesk.onrender.com',
   sessionId: args[1],
   token: args[2],
   deviceId: args[3],
@@ -40,7 +41,8 @@ const iceServers = [
 /**
  * Initialize WebRTC peer connection
  */
-function initPeerConnection() {
+function initPeerConnection(iceServers = [{ urls: 'stun:stun.l.google.com:19302' }]) {
+  console.error('[WebRTC] initPeerConnection with iceServers:', JSON.stringify(iceServers));
   peerConnection = new RTCPeerConnection({ iceServers });
 
   peerConnection.onicecandidate = (event) => {
@@ -235,43 +237,100 @@ function stopScreenCapture() {
 /**
  * Initialize Socket.IO connection
  */
+// NodeHelper.js
+const io = require('socket.io-client'); // ensure this is imported at top
+const fetch = require('node-fetch');    // if you need to fetch TURN token (node 18+ has global fetch)
+
+async function getIceServers(serverUrl, sessionToken) {
+  try {
+    // Try to fetch turn token from the central server (if endpoint exists)
+    const res = await fetch(`${serverUrl}/api/remote/turn-token`, {
+      headers: { Authorization: `Bearer ${sessionToken}` },
+      timeout: 5000,
+    });
+    if (!res.ok) {
+      console.error('[TURN] turn-token fetch failed', res.status);
+      return [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }];
+    }
+    const body = await res.json();
+    return body.iceServers || [{ urls: 'stun:stun.l.google.com:19302' }];
+  } catch (err) {
+    console.error('[TURN] fetch error', err);
+    return [{ urls: 'stun:stun.l.google.com:19302' }];
+  }
+}
+
 function initSocket() {
+  // ensure config.serverUrl and config.deviceId exist; config.token may be session token or JWT
+  const authPayload = {
+    token: config.token,                    // session token (if available)
+    agent: 'desklink-agent',
+    secret: process.env.AGENT_SECRET || 'dev-secret'
+  };
+
+  console.error('[Socket] initSocket: connecting to', config.serverUrl, 'auth', !!authPayload.token, 'agentSecretPresent', !!authPayload.secret);
+
   socket = io(config.serverUrl, {
-    auth: { token: config.token },
+    auth: authPayload,
     transports: ['websocket'],
+    path: '/socket.io', // ensure server uses default path; adjust if your server uses a custom path
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 2000
   });
 
-  socket.on('connect', () => {
-    console.error('[Socket] Connected');
-    socket.emit('register', { deviceId: config.deviceId });
+  // helpful: log every event the socket receives
+  socket.onAny((event, ...args) => {
+    try { console.error('[Socket any]', event, args[0] ?? null); } catch(e){}
   });
 
-  socket.on('disconnect', () => {
-    console.error('[Socket] Disconnected');
+  socket.on('connect', async () => {
+    console.error('[Socket] Connected - id=', socket.id);
+    try {
+      // emit register so server maps deviceId -> socketId (important)
+      socket.emit('register', { deviceId: config.deviceId });
+      socket.emit('register-complete', { deviceId: config.deviceId }); // optional extra event if you want
+      console.error('[Socket] register emitted for', config.deviceId);
+
+      // Optionally fetch TURN/STUN servers and initialize peer connection after socket connected
+      const iceServers = await getIceServers(config.serverUrl, config.token);
+      console.error('[Socket] obtained iceServers', JSON.stringify(iceServers));
+      initPeerConnection(iceServers); // you must adapt your initPeerConnection to accept iceServers
+    } catch (err) {
+      console.error('[Socket] error in connect handler', err);
+    }
   });
 
-  socket.on('webrtc-offer', async ({ sdp }) => {
-    console.error('[Socket] Received offer');
+  socket.on('connect_error', (err) => {
+    console.error('[Socket] connect_error', err && (err.message || err));
+  });
+
+  socket.on('disconnect', (reason) => {
+    console.error('[Socket] Disconnected', reason);
+  });
+
+  socket.on('webrtc-offer', async ({ sdp, sessionId, fromUserId, fromDeviceId, toDeviceId, token }) => {
+    console.error('[Socket] Received offer for session', sessionId);
     try {
       await peerConnection.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp }));
       const answer = await peerConnection.createAnswer();
       await peerConnection.setLocalDescription(answer);
-      
+
       socket.emit('webrtc-answer', {
-        sessionId: config.sessionId,
+        sessionId,
         fromUserId: config.userId,
         fromDeviceId: config.deviceId,
-        toDeviceId: config.remoteDeviceId,
+        toDeviceId: fromDeviceId, // reply to the caller
         sdp: answer.sdp,
-        token: config.token,
+        token: token || config.token
       });
+      console.error('[Socket] sent webrtc-answer for', sessionId);
     } catch (err) {
       console.error('[WebRTC] Error handling offer:', err);
     }
   });
 
-  socket.on('webrtc-answer', async ({ sdp }) => {
-    console.error('[Socket] Received answer');
+  socket.on('webrtc-answer', async ({ sdp, sessionId }) => {
+    console.error('[Socket] Received answer for session', sessionId);
     try {
       await peerConnection.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp }));
     } catch (err) {
@@ -279,9 +338,13 @@ function initSocket() {
     }
   });
 
-  socket.on('webrtc-ice', async ({ candidate }) => {
+  socket.on('webrtc-ice', async ({ candidate, sessionId }) => {
     try {
-      await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+      // candidate may be null or malformed — guard it
+      if (candidate && candidate.candidate) {
+        await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+        console.error('[Socket] added ICE candidate for session', sessionId);
+      }
     } catch (err) {
       console.error('[WebRTC] Error adding ICE candidate:', err);
     }
@@ -295,6 +358,7 @@ function initSocket() {
 
   return socket;
 }
+
 
 /**
  * Start as caller (controller)
