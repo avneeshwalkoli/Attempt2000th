@@ -5,12 +5,30 @@ const ContactLink = require('../models/ContactLink');
 const { emitToUser, emitToDevice } = require('../socketManager');
 const { generateSessionToken } = require('../utils/sessionToken');
 
+// Ensure the calling device exists, belongs to the user, and is not blocked.
+// If the device record does not exist yet, auto-register it for the user.
 const ensureDeviceOwnership = async (deviceId, userId) => {
-  const device = await Device.findOne({ deviceId, deleted: false });
+  const devId = String(deviceId);
+  const ownerId = String(userId);
+
+  let device = await Device.findOne({ deviceId: devId, deleted: false });
+
   if (!device) {
-    throw new Error('Device not found');
+    device = await Device.create({
+      deviceId: devId,
+      userId: ownerId,
+      deviceName: 'Agent Device',
+      osInfo: 'Unknown',
+      platform: '',
+      lastOnline: new Date(),
+      registeredAt: new Date(),
+      blocked: false,
+      deleted: false,
+      label: 'Agent Device',
+    });
   }
-  if (String(device.userId) !== String(userId)) {
+
+  if (String(device.userId) !== ownerId) {
     throw new Error('Device does not belong to user');
   }
   if (device.blocked) {

@@ -9,6 +9,7 @@ const jwt = require('jsonwebtoken');
 const User = require('./models/User');
 const Message = require('./models/Message');
 const RemoteSession = require('./models/RemoteSession');
+const Device = require('./models/Device');
 const { verifySessionToken } = require('./utils/sessionToken');
 
 let ioInstance = null;
@@ -132,19 +133,63 @@ io.use(async (socket, next) => {
     trackUserSocket(onlineUsersByPhone, socket.userPhone, socket.id);
     trackUserSocket(onlineUsersById, socket.userId, socket.id);
 
-    // Optional DeskLink registration: allow clients/devices to register their deviceId
-    socket.on('register', ({ deviceId }) => {
-      if (!deviceId) return;
-      socket.data.deviceId = String(deviceId);
-      const devId = String(deviceId);
-      trackUserSocket(onlineDevicesById, devId, socket.id);
-      // flush pending signals to this device if any
-      const pending = pendingSignalsByDevice.get(devId);
-      if (pending && pending.length > 0) {
-        for (const sig of pending) {
-          try { socket.emit(sig.event, sig.payload); } catch (e) { /* ignore */ }
+    // DeskLink registration: allow clients/devices to register their deviceId
+    // and ensure the device is persisted in MongoDB for remote sessions.
+    socket.on('register', async ({ deviceId, platform, label, osInfo, deviceName }) => {
+      try {
+        if (!deviceId) return;
+
+        const devId = String(deviceId);
+        socket.data.deviceId = devId;
+
+        // Track in-memory mapping for signaling
+        trackUserSocket(onlineDevicesById, devId, socket.id);
+
+        // Auto-register or update device record in MongoDB
+        const userId = socket.userId ? String(socket.userId) : null;
+        const now = new Date();
+
+        if (!userId) {
+          console.warn('[device] register called without authenticated user for deviceId=', devId);
         }
-        pendingSignalsByDevice.delete(devId);
+
+        await Device.updateOne(
+          { deviceId: devId },
+          {
+            $setOnInsert: {
+              deviceId: devId,
+              userId: userId,
+              deviceName: deviceName || label || 'Agent Device',
+              osInfo: osInfo || platform || 'Unknown',
+              platform: platform || '',
+              registeredAt: now,
+              deleted: false,
+              blocked: false,
+              label: label || 'Agent Device',
+            },
+            $set: {
+              lastOnline: now,
+            },
+          },
+          { upsert: true }
+        );
+
+        console.log('[device] registered/updated', devId, 'for user', userId || '(none)');
+
+        // flush pending signals to this device if any
+        const pending = pendingSignalsByDevice.get(devId);
+        if (pending && pending.length > 0) {
+          for (const sig of pending) {
+            try {
+              socket.emit(sig.event, sig.payload);
+            } catch (e) {
+              // ignore
+            }
+          }
+          pendingSignalsByDevice.delete(devId);
+        }
+      } catch (err) {
+        console.error('[device] register error', err && err.message);
       }
     });
 

@@ -20,6 +20,12 @@ const deviceSchema = new mongoose.Schema(
       trim: true,
       maxlength: 120,
     },
+    label: {
+      type: String,
+      trim: true,
+      maxlength: 120,
+      default: 'Agent Device',
+    },
     osInfo: {
       type: String,
       required: true,
