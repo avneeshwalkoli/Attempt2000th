@@ -52,6 +52,7 @@ export function AuthProvider({ children }) {
     setToken(nextToken);
     setUser(nextUser);
     localStorage.setItem(TOKEN_KEY, nextToken);
+    localStorage.setItem('token', nextToken);
     localStorage.setItem(USER_KEY, JSON.stringify(nextUser));
   };
 
@@ -59,6 +60,7 @@ export function AuthProvider({ children }) {
     setToken(null);
     setUser(null);
     localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem('token');
     localStorage.removeItem(USER_KEY);
   };
 

@@ -7,10 +7,16 @@ export function useDeskLinkSocket({ token, onRemoteRequest, onRemoteResponse }) 
   const socketRef = useRef(null);
 
   useEffect(() => {
-    if (!token) return;
+    const effectiveToken =
+      token ||
+      (typeof window !== 'undefined'
+        ? localStorage.getItem('token') || localStorage.getItem('vd_auth_token')
+        : null);
+
+    if (!effectiveToken) return;
 
     const socket = io(SOCKET_URL, {
-      auth: { token },
+      auth: { token: effectiveToken },
       transports: ['websocket'],
     });
 
