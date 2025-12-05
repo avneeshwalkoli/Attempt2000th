@@ -1,5 +1,8 @@
-using SocketIOClient;
+using System;
+using System.Collections.Generic;
 using System.Text.Json;
+using System.Threading.Tasks;
+using SocketIOClient;
 using DeskLinkAgent.IPC;
 using DeskLinkAgent.WebRTC;
 
@@ -20,51 +23,56 @@ public class SocketClient : IAsyncDisposable
 
     public async Task ConnectAsync(string serverUrl)
     {
-        // DEBUG LOG ADDED
-        Console.WriteLine($"[Socket] ConnectAsync called with serverUrl={serverUrl} AGENT_SECRET={Environment.GetEnvironmentVariable("AGENT_SECRET")}");
+        Console.WriteLine($"[Socket] ConnectAsync => serverUrl={serverUrl}");
 
-        // URL LOGIC UPDATED
-        serverUrl = string.IsNullOrWhiteSpace(serverUrl) ? "https://anydesk.onrender.com" : serverUrl;
+        var agentSecret = Environment.GetEnvironmentVariable("AGENT_SECRET") ?? "dev-secret";
 
-        // CLIENT INITIALIZATION UPDATED
-        _client ??= new SocketIO(serverUrl, new SocketIOOptions
+        // Use fully-qualified type to avoid namespace/type ambiguity
+        _client = new SocketIOClient.SocketIO(serverUrl, new SocketIOOptions
         {
-            Eio = 4,
-            Transport = SocketIOClient.Transport.TransportProtocol.WebSocket,
             Reconnection = true,
-            ReconnectionDelay = 2000,
             ReconnectionAttempts = int.MaxValue,
-            // Auth payload for agent shared secret
-            Auth = new { agent = "desklink-agent", secret = Environment.GetEnvironmentVariable("AGENT_SECRET") ?? "dev-secret" }
+            ReconnectionDelay = 2000,
+            // Auth must be a dictionary for this client version
+            Auth = new Dictionary<string, object>
+            {
+                { "agent", "desklink-agent" },
+                { "secret", agentSecret }
+            }
         });
 
-        // ONCONNECTED HANDLER UPDATED
-        _client.OnConnected += async (sender, e) =>
+        // Connected handler
+        _client.OnConnected += async (_, __) =>
         {
-            Console.WriteLine("[Socket] connected");
-            // Register the deviceId so server maps deviceId -> socketId
+            Console.WriteLine("[Socket] connected ✓");
+
+            // Register device so server maps deviceId -> socketId
             await Emit("register", new { deviceId = _deviceId });
-            // keep existing agent-auth/status for backwards compatibility
+
+            // Backward compatibility events
             await Emit("agent-auth", new { deviceId = _deviceId });
             await Emit("agent-status", new { status = "online", deviceId = _deviceId });
+
+            Console.WriteLine("[Socket] register + auth emitted ✓");
         };
 
-        _client.OnDisconnected += (sender, e) =>
+        // Disconnected handler
+        _client.OnDisconnected += (_, reason) =>
         {
-            Console.WriteLine("[Socket] disconnected");
+            Console.WriteLine("[Socket] disconnected => " + reason);
         };
 
         // Server -> Agent events
         _client.On("remote-request", response =>
         {
             Console.WriteLine("[Socket] remote-request received");
-            _ipc.NotifyIncomingRemoteRequest();
+            try { _ipc.NotifyIncomingRemoteRequest(); } catch (Exception e) { Console.Error.WriteLine("[IPC] NotifyIncomingRemoteRequest error: " + e); }
         });
 
         _client.On("remote-accept", response =>
         {
             Console.WriteLine("[Socket] remote-accept received");
-            _ipc.NotifyRemoteSessionAccepted();
+            try { _ipc.NotifyRemoteSessionAccepted(); } catch (Exception e) { Console.Error.WriteLine("[IPC] NotifyRemoteSessionAccepted error: " + e); }
         });
 
         _client.On("remote-reject", response =>
@@ -75,7 +83,7 @@ public class SocketClient : IAsyncDisposable
         _client.On("remote-end", response =>
         {
             Console.WriteLine("[Socket] remote-end received");
-            _ipc.NotifyRemoteSessionEnded();
+            try { _ipc.NotifyRemoteSessionEnded(); } catch (Exception e) { Console.Error.WriteLine("[IPC] NotifyRemoteSessionEnded error: " + e); }
             StopWebRTC();
         });
 
@@ -84,33 +92,33 @@ public class SocketClient : IAsyncDisposable
         {
             try
             {
-                var data = response.GetValue<JsonElement>();
-                var sessionId = data.GetProperty("sessionId").GetString();
-                var token = data.GetProperty("token").GetString();
-                var role = data.GetProperty("role").GetString();
-                var callerDeviceId = data.GetProperty("callerDeviceId").GetString();
-                var receiverDeviceId = data.GetProperty("receiverDeviceId").GetString();
-                
-                Console.WriteLine($"[Socket] Session start: {sessionId}, role: {role}");
-                
-                // Start WebRTC helper
-                StartWebRTC(sessionId, token, role, callerDeviceId, receiverDeviceId, serverUrl);
+                var json = response.GetValue<JsonElement>();
+                var sessionId = json.GetProperty("sessionId").GetString();
+                var token = json.GetProperty("token").GetString();
+                var role = json.GetProperty("role").GetString();
+                var callerDeviceId = json.GetProperty("callerDeviceId").GetString();
+                var receiverDeviceId = json.GetProperty("receiverDeviceId").GetString();
+
+                Console.WriteLine($"[Socket] desklink-session-start => session={sessionId}, role={role}");
+
+                // Start WebRTC helper (null-forgiving since we validated above)
+                StartWebRTC(sessionId!, token!, role!, callerDeviceId!, receiverDeviceId!, serverUrl);
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"[Socket] Error handling session start: {ex.Message}");
+                Console.Error.WriteLine("[Socket] error parsing desklink-session-start: " + ex);
             }
         });
 
-        _client.On("desklink-session-ended", response =>
+        _client.On("desklink-session-ended", _ =>
         {
-            Console.WriteLine("[Socket] Session ended");
+            Console.WriteLine("[Socket] desklink-session-ended");
             StopWebRTC();
         });
 
-        _client.On("webrtc-cancel", response =>
+        _client.On("webrtc-cancel", _ =>
         {
-            Console.WriteLine("[Socket] WebRTC cancelled");
+            Console.WriteLine("[Socket] webrtc-cancel received");
             StopWebRTC();
         });
 
@@ -126,7 +134,7 @@ public class SocketClient : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[Socket] emit error {eventName}: {ex.Message}");
+            Console.Error.WriteLine($"[Socket] emit error ({eventName}): {ex.Message}");
         }
     }
 
@@ -134,34 +142,38 @@ public class SocketClient : IAsyncDisposable
     {
         try
         {
-            StopWebRTC(); // Stop any existing session
-            
+            StopWebRTC();
+
             var remoteDeviceId = role == "receiver" ? callerDeviceId : receiverDeviceId;
-            
+
             _webrtcLauncher = new WebRTCLauncher(
                 sessionId,
                 token,
                 _deviceId,
-                "agent-user-id", // TODO: Get actual user ID
+                "agent-user-id", // TODO: replace with real user id
                 remoteDeviceId,
                 role,
                 serverUrl
             );
-            
+
             _webrtcLauncher.Start();
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[Socket] Failed to start WebRTC: {ex.Message}");
+            Console.Error.WriteLine("[Socket] Failed to start WebRTC: " + ex);
         }
     }
 
     private void StopWebRTC()
     {
-        if (_webrtcLauncher != null)
+        try
         {
-            _webrtcLauncher.Dispose();
+            _webrtcLauncher?.Dispose();
             _webrtcLauncher = null;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine("[Socket] StopWebRTC error: " + ex);
         }
     }
 
@@ -170,15 +182,10 @@ public class SocketClient : IAsyncDisposable
         try
         {
             StopWebRTC();
-            if (_client != null)
-            {
-                _client.Dispose();
-            }
-            return ValueTask.CompletedTask;
+            _client?.Dispose();
         }
-        catch
-        {
-            return ValueTask.CompletedTask;
-        }
+        catch { }
+
+        return ValueTask.CompletedTask;
     }
 }
