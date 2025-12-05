@@ -989,7 +989,7 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
     }
 
     // Initialize socket connection with auto-reconnect disabled if meeting ended
-    socketRef.current = io('http://localhost:5000', {
+    socketRef.current = io(import.meta.env.VITE_SOCKET_URL || 'https://anydesk.onrender.com', {
       transports: ['websocket'],
       reconnection: !meetingEndedRef.current,
       reconnectionDelay: 1000,

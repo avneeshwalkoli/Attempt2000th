@@ -8,10 +8,72 @@
     ".NETCoreApp,Version=v8.0": {
       "DeskLinkAgent/1.0.0": {
         "dependencies": {
-          "System.Management": "7.0.2"
+          "SocketIOClient": "3.1.2",
+          "System.Management": "7.0.2",
+          "Watson": "6.4.0"
         },
         "runtime": {
           "DeskLinkAgent.dll": {}
+        }
+      },
+      "IpMatcher/1.0.5": {
+        "runtime": {
+          "lib/net8.0/IpMatcher.dll": {
+            "assemblyVersion": "1.0.5.0",
+            "fileVersion": "1.0.5.0"
+          }
+        }
+      },
+      "RegexMatcher/1.0.9": {
+        "runtime": {
+          "lib/net8.0/RegexMatcher.dll": {
+            "assemblyVersion": "1.0.9.0",
+            "fileVersion": "1.0.9.0"
+          }
+        }
+      },
+      "SocketIO.Core/3.1.2": {
+        "runtime": {
+          "lib/netstandard2.0/SocketIO.Core.dll": {
+            "assemblyVersion": "3.1.2.0",
+            "fileVersion": "3.1.2.0"
+          }
+        }
+      },
+      "SocketIO.Serializer.Core/3.1.2": {
+        "dependencies": {
+          "SocketIO.Core": "3.1.2"
+        },
+        "runtime": {
+          "lib/netstandard2.0/SocketIO.Serializer.Core.dll": {
+            "assemblyVersion": "3.1.2.0",
+            "fileVersion": "3.1.2.0"
+          }
+        }
+      },
+      "SocketIO.Serializer.SystemTextJson/3.1.2": {
+        "dependencies": {
+          "SocketIO.Core": "3.1.2",
+          "SocketIO.Serializer.Core": "3.1.2",
+          "System.Text.Json": "8.0.5"
+        },
+        "runtime": {
+          "lib/netstandard2.0/SocketIO.Serializer.SystemTextJson.dll": {
+            "assemblyVersion": "3.1.2.0",
+            "fileVersion": "3.1.2.0"
+          }
+        }
+      },
+      "SocketIOClient/3.1.2": {
+        "dependencies": {
+          "SocketIO.Serializer.Core": "3.1.2",
+          "SocketIO.Serializer.SystemTextJson": "3.1.2"
+        },
+        "runtime": {
+          "lib/net6.0/SocketIOClient.dll": {
+            "assemblyVersion": "3.1.2.0",
+            "fileVersion": "3.1.2.0"
+          }
         }
       },
       "System.CodeDom/7.0.0": {
@@ -40,6 +102,49 @@
             "fileVersion": "7.0.723.27404"
           }
         }
+      },
+      "System.Text.Json/8.0.5": {},
+      "Timestamps/1.0.11": {
+        "runtime": {
+          "lib/net8.0/Timestamps.dll": {
+            "assemblyVersion": "1.0.11.0",
+            "fileVersion": "1.0.11.0"
+          }
+        }
+      },
+      "UrlMatcher/3.0.1": {
+        "runtime": {
+          "lib/net8.0/UrlMatcher.dll": {
+            "assemblyVersion": "3.0.1.0",
+            "fileVersion": "3.0.1.0"
+          }
+        }
+      },
+      "Watson/6.4.0": {
+        "dependencies": {
+          "Watson.Core": "6.4.0"
+        },
+        "runtime": {
+          "lib/net8.0/WatsonWebserver.dll": {
+            "assemblyVersion": "6.4.0.0",
+            "fileVersion": "6.4.0.0"
+          }
+        }
+      },
+      "Watson.Core/6.4.0": {
+        "dependencies": {
+          "IpMatcher": "1.0.5",
+          "RegexMatcher": "1.0.9",
+          "System.Text.Json": "8.0.5",
+          "Timestamps": "1.0.11",
+          "UrlMatcher": "3.0.1"
+        },
+        "runtime": {
+          "lib/net8.0/WatsonWebserver.Core.dll": {
+            "assemblyVersion": "6.4.0.0",
+            "fileVersion": "6.4.0.0"
+          }
+        }
       }
     }
   },
@@ -48,6 +153,48 @@
       "type": "project",
       "serviceable": false,
       "sha512": ""
+    },
+    "IpMatcher/1.0.5": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-WXNlWERj+0GN699AnMNsuJ7PfUAbU4xhOHP3nrNXLHqbOaBxybu25luSYywX1133NSlitA4YkSNmJuyPvea4sw==",
+      "path": "ipmatcher/1.0.5",
+      "hashPath": "ipmatcher.1.0.5.nupkg.sha512"
+    },
+    "RegexMatcher/1.0.9": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-RkQGXIrqHjD5h1mqefhgCbkaSdRYNRG5rrbzyw5zeLWiS0K1wq9xR3cNhQdzYR2MsKZ3GN523yRUsEQIMPxh3Q==",
+      "path": "regexmatcher/1.0.9",
+      "hashPath": "regexmatcher.1.0.9.nupkg.sha512"
+    },
+    "SocketIO.Core/3.1.2": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-tb6vZ7DYhZooRGLHTPK7/Gifbu+kHbkQRbsee0LAnI28pWc5+Br+juh4pvid3kfIrGTl5dzAfy5huLELVU4svA==",
+      "path": "socketio.core/3.1.2",
+      "hashPath": "socketio.core.3.1.2.nupkg.sha512"
+    },
+    "SocketIO.Serializer.Core/3.1.2": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-/cJtU3JVzjqP/Jh3BpMMR0aNzYua6s9e3+hjZ6OnYprFHrGYyg/n9OcST1dBjmOvvgyJ3GwJlyq0NjnPETAHsA==",
+      "path": "socketio.serializer.core/3.1.2",
+      "hashPath": "socketio.serializer.core.3.1.2.nupkg.sha512"
+    },
+    "SocketIO.Serializer.SystemTextJson/3.1.2": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-AA8w3Y4JldC3FaL1D4WuyG4zLPdrzjf8AQx1LCKtzlMlTLOcbEW0UGt+BhKxkUnxYAD5O5fsqRrTNCGXu6VeWA==",
+      "path": "socketio.serializer.systemtextjson/3.1.2",
+      "hashPath": "socketio.serializer.systemtextjson.3.1.2.nupkg.sha512"
+    },
+    "SocketIOClient/3.1.2": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-CMmnmhvG1Qf8k6BPh3RLqc/9MNvGUlCOyptjoP8a62bowPQkHTWvN25yy+gQqx5Ry/NgzkQHBJNpmRJhZNZrVQ==",
+      "path": "socketioclient/3.1.2",
+      "hashPath": "socketioclient.3.1.2.nupkg.sha512"
     },
     "System.CodeDom/7.0.0": {
       "type": "package",
@@ -62,6 +209,41 @@
       "sha512": "sha512-/qEUN91mP/MUQmJnM5y5BdT7ZoPuVrtxnFlbJ8a3kBJGhe2wCzBfnPFtK2wTtEEcf3DMGR9J00GZZfg6HRI6yA==",
       "path": "system.management/7.0.2",
       "hashPath": "system.management.7.0.2.nupkg.sha512"
+    },
+    "System.Text.Json/8.0.5": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-0f1B50Ss7rqxXiaBJyzUu9bWFOO2/zSlifZ/UNMdiIpDYe4cY4LQQicP4nirK1OS31I43rn062UIJ1Q9bpmHpg==",
+      "path": "system.text.json/8.0.5",
+      "hashPath": "system.text.json.8.0.5.nupkg.sha512"
+    },
+    "Timestamps/1.0.11": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-SnWhXm3FkEStQGgUTfWMh9mKItNW032o/v8eAtFrOGqG0/ejvPPA1LdLZx0N/qqoY0TH3x11+dO00jeVcM8xNQ==",
+      "path": "timestamps/1.0.11",
+      "hashPath": "timestamps.1.0.11.nupkg.sha512"
+    },
+    "UrlMatcher/3.0.1": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-hHBZVzFSfikrx4XsRsnCIwmGLgbNKtntnlqf4z+ygcNA6Y/L/J0x5GiZZWfXdTfpxhy5v7mlt2zrZs/L9SvbOA==",
+      "path": "urlmatcher/3.0.1",
+      "hashPath": "urlmatcher.3.0.1.nupkg.sha512"
+    },
+    "Watson/6.4.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-+GrAn889LmtLbip6xpJxuxx2j8iCAZSeKaCPghfGrispyatv0zQmp+Bxpzek5fMe15AiVDk2AJnHGdk5P+PULA==",
+      "path": "watson/6.4.0",
+      "hashPath": "watson.6.4.0.nupkg.sha512"
+    },
+    "Watson.Core/6.4.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-6cAdihyFuqLzNgSUe/qiXLXcQd44d/cA9F8y/2TBfv816+mO3uDyiiqlwwrzG4qRsGfFYtxU3Rnqi9Ahc1s0sw==",
+      "path": "watson.core/6.4.0",
+      "hashPath": "watson.core.6.4.0.nupkg.sha512"
     }
   }
 }

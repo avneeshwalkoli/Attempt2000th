@@ -9,7 +9,7 @@ public class SocketClient : IAsyncDisposable
 {
     private readonly string _deviceId;
     private readonly AgentIpcServer _ipc;
-    private SocketIO? _client;
+    private SocketIOClient.SocketIO? _client;
     private WebRTCLauncher? _webrtcLauncher;
 
     public SocketClient(string deviceId, AgentIpcServer ipc)
@@ -20,9 +20,8 @@ public class SocketClient : IAsyncDisposable
 
     public async Task ConnectAsync(string serverUrl)
     {
-        _client ??= new SocketIO(serverUrl, new SocketIOOptions
+        _client ??= new SocketIOClient.SocketIO(serverUrl, new SocketIOOptions
         {
-            Eio = 4,
             Transport = SocketIOClient.Transport.TransportProtocol.WebSocket,
             Reconnection = true,
             ReconnectionDelay = 2000,
@@ -157,7 +156,11 @@ public class SocketClient : IAsyncDisposable
         try
         {
             StopWebRTC();
-            return _client != null ? _client.DisposeAsync() : ValueTask.CompletedTask;
+            if (_client != null)
+            {
+                _client.Dispose();
+            }
+            return ValueTask.CompletedTask;
         }
         catch
         {

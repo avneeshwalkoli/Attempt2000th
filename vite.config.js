@@ -14,7 +14,9 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     allowedHosts: [
-      'alexandria-collar-separation-experimental.trycloudflare.com',
+      '.trycloudflare.com', // allow all cloudflared links
+      '.cfargotunnel.com',  // alternate domain cloudflared uses
+      'localhost',
     ],
   },
 });

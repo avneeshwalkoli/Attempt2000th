@@ -50,9 +50,17 @@
         "net8.0": {
           "targetAlias": "net8.0",
           "dependencies": {
+            "SocketIOClient": {
+              "target": "Package",
+              "version": "[3.1.2, )"
+            },
             "System.Management": {
               "target": "Package",
               "version": "[7.0.2, )"
+            },
+            "Watson": {
+              "target": "Package",
+              "version": "[6.4.0, )"
             }
           },
           "imports": [

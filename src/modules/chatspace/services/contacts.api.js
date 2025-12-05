@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:5000/api';
+const API_BASE = import.meta.env.VITE_API_BASE || 'https://anydesk.onrender.com/api';
 
 const parseJSON = async (res) => {
   const data = await res.json().catch(() => ({}));

@@ -1,11 +1,22 @@
 {
   "version": 2,
-  "dgSpecHash": "qKjAHMmDa8Y=",
+  "dgSpecHash": "aljITwQI/4c=",
   "success": true,
   "projectFilePath": "C:\\Users\\yasha\\OneDrive\\Desktop\\parattttt\\VisionDesk__2.0\\DeskLinkAgent\\DeskLinkAgent.csproj",
   "expectedPackageFiles": [
+    "C:\\Users\\yasha\\.nuget\\packages\\ipmatcher\\1.0.5\\ipmatcher.1.0.5.nupkg.sha512",
+    "C:\\Users\\yasha\\.nuget\\packages\\regexmatcher\\1.0.9\\regexmatcher.1.0.9.nupkg.sha512",
+    "C:\\Users\\yasha\\.nuget\\packages\\socketio.core\\3.1.2\\socketio.core.3.1.2.nupkg.sha512",
+    "C:\\Users\\yasha\\.nuget\\packages\\socketio.serializer.core\\3.1.2\\socketio.serializer.core.3.1.2.nupkg.sha512",
+    "C:\\Users\\yasha\\.nuget\\packages\\socketio.serializer.systemtextjson\\3.1.2\\socketio.serializer.systemtextjson.3.1.2.nupkg.sha512",
+    "C:\\Users\\yasha\\.nuget\\packages\\socketioclient\\3.1.2\\socketioclient.3.1.2.nupkg.sha512",
     "C:\\Users\\yasha\\.nuget\\packages\\system.codedom\\7.0.0\\system.codedom.7.0.0.nupkg.sha512",
-    "C:\\Users\\yasha\\.nuget\\packages\\system.management\\7.0.2\\system.management.7.0.2.nupkg.sha512"
+    "C:\\Users\\yasha\\.nuget\\packages\\system.management\\7.0.2\\system.management.7.0.2.nupkg.sha512",
+    "C:\\Users\\yasha\\.nuget\\packages\\system.text.json\\8.0.5\\system.text.json.8.0.5.nupkg.sha512",
+    "C:\\Users\\yasha\\.nuget\\packages\\timestamps\\1.0.11\\timestamps.1.0.11.nupkg.sha512",
+    "C:\\Users\\yasha\\.nuget\\packages\\urlmatcher\\3.0.1\\urlmatcher.3.0.1.nupkg.sha512",
+    "C:\\Users\\yasha\\.nuget\\packages\\watson\\6.4.0\\watson.6.4.0.nupkg.sha512",
+    "C:\\Users\\yasha\\.nuget\\packages\\watson.core\\6.4.0\\watson.core.6.4.0.nupkg.sha512"
   ],
   "logs": []
 }

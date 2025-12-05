@@ -2,6 +2,98 @@
   "version": 3,
   "targets": {
     "net8.0": {
+      "IpMatcher/1.0.5": {
+        "type": "package",
+        "compile": {
+          "lib/net8.0/IpMatcher.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net8.0/IpMatcher.dll": {
+            "related": ".xml"
+          }
+        },
+        "contentFiles": {
+          "contentFiles/any/any/_._": {
+            "buildAction": "None",
+            "codeLanguage": "any",
+            "copyToOutput": false
+          }
+        }
+      },
+      "RegexMatcher/1.0.9": {
+        "type": "package",
+        "compile": {
+          "lib/net8.0/RegexMatcher.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net8.0/RegexMatcher.dll": {
+            "related": ".xml"
+          }
+        },
+        "contentFiles": {
+          "contentFiles/any/any/_._": {
+            "buildAction": "None",
+            "codeLanguage": "any",
+            "copyToOutput": false
+          }
+        }
+      },
+      "SocketIO.Core/3.1.2": {
+        "type": "package",
+        "compile": {
+          "lib/netstandard2.0/SocketIO.Core.dll": {}
+        },
+        "runtime": {
+          "lib/netstandard2.0/SocketIO.Core.dll": {}
+        }
+      },
+      "SocketIO.Serializer.Core/3.1.2": {
+        "type": "package",
+        "dependencies": {
+          "SocketIO.Core": "3.1.2"
+        },
+        "compile": {
+          "lib/netstandard2.0/SocketIO.Serializer.Core.dll": {}
+        },
+        "runtime": {
+          "lib/netstandard2.0/SocketIO.Serializer.Core.dll": {}
+        }
+      },
+      "SocketIO.Serializer.SystemTextJson/3.1.2": {
+        "type": "package",
+        "dependencies": {
+          "SocketIO.Core": "3.1.2",
+          "SocketIO.Serializer.Core": "3.1.2",
+          "System.Text.Json": "8.0.4"
+        },
+        "compile": {
+          "lib/netstandard2.0/SocketIO.Serializer.SystemTextJson.dll": {}
+        },
+        "runtime": {
+          "lib/netstandard2.0/SocketIO.Serializer.SystemTextJson.dll": {}
+        }
+      },
+      "SocketIOClient/3.1.2": {
+        "type": "package",
+        "dependencies": {
+          "SocketIO.Serializer.Core": "3.1.2",
+          "SocketIO.Serializer.SystemTextJson": "3.1.2"
+        },
+        "compile": {
+          "lib/net6.0/SocketIOClient.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net6.0/SocketIOClient.dll": {
+            "related": ".xml"
+          }
+        }
+      },
       "System.CodeDom/7.0.0": {
         "type": "package",
         "compile": {
@@ -42,10 +134,235 @@
             "rid": "win"
           }
         }
+      },
+      "System.Text.Json/8.0.5": {
+        "type": "package",
+        "compile": {
+          "lib/net8.0/System.Text.Json.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net8.0/System.Text.Json.dll": {
+            "related": ".xml"
+          }
+        },
+        "build": {
+          "buildTransitive/net6.0/System.Text.Json.targets": {}
+        }
+      },
+      "Timestamps/1.0.11": {
+        "type": "package",
+        "compile": {
+          "lib/net8.0/Timestamps.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net8.0/Timestamps.dll": {
+            "related": ".xml"
+          }
+        },
+        "contentFiles": {
+          "contentFiles/any/any/_._": {
+            "buildAction": "None",
+            "codeLanguage": "any",
+            "copyToOutput": false
+          }
+        }
+      },
+      "UrlMatcher/3.0.1": {
+        "type": "package",
+        "compile": {
+          "lib/net8.0/UrlMatcher.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net8.0/UrlMatcher.dll": {
+            "related": ".xml"
+          }
+        },
+        "contentFiles": {
+          "contentFiles/any/any/_._": {
+            "buildAction": "None",
+            "codeLanguage": "any",
+            "copyToOutput": false
+          }
+        }
+      },
+      "Watson/6.4.0": {
+        "type": "package",
+        "dependencies": {
+          "Watson.Core": "6.4.0"
+        },
+        "compile": {
+          "lib/net8.0/WatsonWebserver.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net8.0/WatsonWebserver.dll": {
+            "related": ".xml"
+          }
+        }
+      },
+      "Watson.Core/6.4.0": {
+        "type": "package",
+        "dependencies": {
+          "IpMatcher": "1.0.5",
+          "RegexMatcher": "1.0.9",
+          "System.Text.Json": "8.0.5",
+          "Timestamps": "1.0.11",
+          "UrlMatcher": "3.0.1"
+        },
+        "compile": {
+          "lib/net8.0/WatsonWebserver.Core.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net8.0/WatsonWebserver.Core.dll": {
+            "related": ".xml"
+          }
+        },
+        "contentFiles": {
+          "contentFiles/any/any/_._": {
+            "buildAction": "None",
+            "codeLanguage": "any",
+            "copyToOutput": false
+          }
+        }
       }
     }
   },
   "libraries": {
+    "IpMatcher/1.0.5": {
+      "sha512": "WXNlWERj+0GN699AnMNsuJ7PfUAbU4xhOHP3nrNXLHqbOaBxybu25luSYywX1133NSlitA4YkSNmJuyPvea4sw==",
+      "type": "package",
+      "path": "ipmatcher/1.0.5",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "LICENSE.md",
+        "README.md",
+        "content/icon.ico",
+        "contentFiles/any/net462/icon.ico",
+        "contentFiles/any/net48/icon.ico",
+        "contentFiles/any/net6.0/icon.ico",
+        "contentFiles/any/net8.0/icon.ico",
+        "contentFiles/any/netstandard2.0/icon.ico",
+        "contentFiles/any/netstandard2.1/icon.ico",
+        "icon.png",
+        "ipmatcher.1.0.5.nupkg.sha512",
+        "ipmatcher.nuspec",
+        "lib/net462/IpMatcher.dll",
+        "lib/net462/IpMatcher.xml",
+        "lib/net48/IpMatcher.dll",
+        "lib/net48/IpMatcher.xml",
+        "lib/net6.0/IpMatcher.dll",
+        "lib/net6.0/IpMatcher.xml",
+        "lib/net8.0/IpMatcher.dll",
+        "lib/net8.0/IpMatcher.xml",
+        "lib/netstandard2.0/IpMatcher.dll",
+        "lib/netstandard2.0/IpMatcher.xml",
+        "lib/netstandard2.1/IpMatcher.dll",
+        "lib/netstandard2.1/IpMatcher.xml"
+      ]
+    },
+    "RegexMatcher/1.0.9": {
+      "sha512": "RkQGXIrqHjD5h1mqefhgCbkaSdRYNRG5rrbzyw5zeLWiS0K1wq9xR3cNhQdzYR2MsKZ3GN523yRUsEQIMPxh3Q==",
+      "type": "package",
+      "path": "regexmatcher/1.0.9",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "LICENSE.md",
+        "README.md",
+        "content/LICENSE.md",
+        "content/icon.ico",
+        "contentFiles/any/net462/LICENSE.md",
+        "contentFiles/any/net462/icon.ico",
+        "contentFiles/any/net48/LICENSE.md",
+        "contentFiles/any/net48/icon.ico",
+        "contentFiles/any/net6.0/LICENSE.md",
+        "contentFiles/any/net6.0/icon.ico",
+        "contentFiles/any/net8.0/LICENSE.md",
+        "contentFiles/any/net8.0/icon.ico",
+        "contentFiles/any/netstandard2.0/LICENSE.md",
+        "contentFiles/any/netstandard2.0/icon.ico",
+        "contentFiles/any/netstandard2.1/LICENSE.md",
+        "contentFiles/any/netstandard2.1/icon.ico",
+        "icon.png",
+        "lib/net462/RegexMatcher.dll",
+        "lib/net462/RegexMatcher.xml",
+        "lib/net48/RegexMatcher.dll",
+        "lib/net48/RegexMatcher.xml",
+        "lib/net6.0/RegexMatcher.dll",
+        "lib/net6.0/RegexMatcher.xml",
+        "lib/net8.0/RegexMatcher.dll",
+        "lib/net8.0/RegexMatcher.xml",
+        "lib/netstandard2.0/RegexMatcher.dll",
+        "lib/netstandard2.0/RegexMatcher.xml",
+        "lib/netstandard2.1/RegexMatcher.dll",
+        "lib/netstandard2.1/RegexMatcher.xml",
+        "regexmatcher.1.0.9.nupkg.sha512",
+        "regexmatcher.nuspec"
+      ]
+    },
+    "SocketIO.Core/3.1.2": {
+      "sha512": "tb6vZ7DYhZooRGLHTPK7/Gifbu+kHbkQRbsee0LAnI28pWc5+Br+juh4pvid3kfIrGTl5dzAfy5huLELVU4svA==",
+      "type": "package",
+      "path": "socketio.core/3.1.2",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "lib/netstandard2.0/SocketIO.Core.dll",
+        "socketio.core.3.1.2.nupkg.sha512",
+        "socketio.core.nuspec"
+      ]
+    },
+    "SocketIO.Serializer.Core/3.1.2": {
+      "sha512": "/cJtU3JVzjqP/Jh3BpMMR0aNzYua6s9e3+hjZ6OnYprFHrGYyg/n9OcST1dBjmOvvgyJ3GwJlyq0NjnPETAHsA==",
+      "type": "package",
+      "path": "socketio.serializer.core/3.1.2",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "lib/netstandard2.0/SocketIO.Serializer.Core.dll",
+        "socketio.serializer.core.3.1.2.nupkg.sha512",
+        "socketio.serializer.core.nuspec"
+      ]
+    },
+    "SocketIO.Serializer.SystemTextJson/3.1.2": {
+      "sha512": "AA8w3Y4JldC3FaL1D4WuyG4zLPdrzjf8AQx1LCKtzlMlTLOcbEW0UGt+BhKxkUnxYAD5O5fsqRrTNCGXu6VeWA==",
+      "type": "package",
+      "path": "socketio.serializer.systemtextjson/3.1.2",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "lib/netstandard2.0/SocketIO.Serializer.SystemTextJson.dll",
+        "socketio.serializer.systemtextjson.3.1.2.nupkg.sha512",
+        "socketio.serializer.systemtextjson.nuspec"
+      ]
+    },
+    "SocketIOClient/3.1.2": {
+      "sha512": "CMmnmhvG1Qf8k6BPh3RLqc/9MNvGUlCOyptjoP8a62bowPQkHTWvN25yy+gQqx5Ry/NgzkQHBJNpmRJhZNZrVQ==",
+      "type": "package",
+      "path": "socketioclient/3.1.2",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "lib/net462/SocketIOClient.dll",
+        "lib/net462/SocketIOClient.xml",
+        "lib/net6.0/SocketIOClient.dll",
+        "lib/net6.0/SocketIOClient.xml",
+        "lib/netstandard2.0/SocketIOClient.dll",
+        "lib/netstandard2.0/SocketIOClient.xml",
+        "socketioclient.3.1.2.nupkg.sha512",
+        "socketioclient.nuspec"
+      ]
+    },
     "System.CodeDom/7.0.0": {
       "sha512": "GLltyqEsE5/3IE+zYRP5sNa1l44qKl9v+bfdMcwg+M9qnQf47wK3H0SUR/T+3N4JEQXF3vV4CSuuo0rsg+nq2A==",
       "type": "package",
@@ -100,11 +417,211 @@
         "system.management.nuspec",
         "useSharedDesignerContext.txt"
       ]
+    },
+    "System.Text.Json/8.0.5": {
+      "sha512": "0f1B50Ss7rqxXiaBJyzUu9bWFOO2/zSlifZ/UNMdiIpDYe4cY4LQQicP4nirK1OS31I43rn062UIJ1Q9bpmHpg==",
+      "type": "package",
+      "path": "system.text.json/8.0.5",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "Icon.png",
+        "LICENSE.TXT",
+        "PACKAGE.md",
+        "THIRD-PARTY-NOTICES.TXT",
+        "analyzers/dotnet/roslyn3.11/cs/System.Text.Json.SourceGeneration.dll",
+        "analyzers/dotnet/roslyn3.11/cs/cs/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn3.11/cs/de/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn3.11/cs/es/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn3.11/cs/fr/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn3.11/cs/it/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn3.11/cs/ja/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn3.11/cs/ko/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn3.11/cs/pl/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn3.11/cs/pt-BR/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn3.11/cs/ru/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn3.11/cs/tr/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn3.11/cs/zh-Hans/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn3.11/cs/zh-Hant/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn4.0/cs/System.Text.Json.SourceGeneration.dll",
+        "analyzers/dotnet/roslyn4.0/cs/cs/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn4.0/cs/de/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn4.0/cs/es/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn4.0/cs/fr/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn4.0/cs/it/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn4.0/cs/ja/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn4.0/cs/ko/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn4.0/cs/pl/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn4.0/cs/pt-BR/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn4.0/cs/ru/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn4.0/cs/tr/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn4.0/cs/zh-Hans/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn4.0/cs/zh-Hant/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn4.4/cs/System.Text.Json.SourceGeneration.dll",
+        "analyzers/dotnet/roslyn4.4/cs/cs/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn4.4/cs/de/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn4.4/cs/es/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn4.4/cs/fr/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn4.4/cs/it/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn4.4/cs/ja/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn4.4/cs/ko/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn4.4/cs/pl/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn4.4/cs/pt-BR/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn4.4/cs/ru/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn4.4/cs/tr/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn4.4/cs/zh-Hans/System.Text.Json.SourceGeneration.resources.dll",
+        "analyzers/dotnet/roslyn4.4/cs/zh-Hant/System.Text.Json.SourceGeneration.resources.dll",
+        "buildTransitive/net461/System.Text.Json.targets",
+        "buildTransitive/net462/System.Text.Json.targets",
+        "buildTransitive/net6.0/System.Text.Json.targets",
+        "buildTransitive/netcoreapp2.0/System.Text.Json.targets",
+        "buildTransitive/netstandard2.0/System.Text.Json.targets",
+        "lib/net462/System.Text.Json.dll",
+        "lib/net462/System.Text.Json.xml",
+        "lib/net6.0/System.Text.Json.dll",
+        "lib/net6.0/System.Text.Json.xml",
+        "lib/net7.0/System.Text.Json.dll",
+        "lib/net7.0/System.Text.Json.xml",
+        "lib/net8.0/System.Text.Json.dll",
+        "lib/net8.0/System.Text.Json.xml",
+        "lib/netstandard2.0/System.Text.Json.dll",
+        "lib/netstandard2.0/System.Text.Json.xml",
+        "system.text.json.8.0.5.nupkg.sha512",
+        "system.text.json.nuspec",
+        "useSharedDesignerContext.txt"
+      ]
+    },
+    "Timestamps/1.0.11": {
+      "sha512": "SnWhXm3FkEStQGgUTfWMh9mKItNW032o/v8eAtFrOGqG0/ejvPPA1LdLZx0N/qqoY0TH3x11+dO00jeVcM8xNQ==",
+      "type": "package",
+      "path": "timestamps/1.0.11",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "LICENSE.md",
+        "README.md",
+        "content/Assets/logo.ico",
+        "contentFiles/any/net462/Assets/logo.ico",
+        "contentFiles/any/net48/Assets/logo.ico",
+        "contentFiles/any/net6.0/Assets/logo.ico",
+        "contentFiles/any/net8.0/Assets/logo.ico",
+        "contentFiles/any/netstandard2.0/Assets/logo.ico",
+        "contentFiles/any/netstandard2.1/Assets/logo.ico",
+        "lib/net462/Timestamps.dll",
+        "lib/net462/Timestamps.xml",
+        "lib/net48/Timestamps.dll",
+        "lib/net48/Timestamps.xml",
+        "lib/net6.0/Timestamps.dll",
+        "lib/net6.0/Timestamps.xml",
+        "lib/net8.0/Timestamps.dll",
+        "lib/net8.0/Timestamps.xml",
+        "lib/netstandard2.0/Timestamps.dll",
+        "lib/netstandard2.0/Timestamps.xml",
+        "lib/netstandard2.1/Timestamps.dll",
+        "lib/netstandard2.1/Timestamps.xml",
+        "logo.png",
+        "timestamps.1.0.11.nupkg.sha512",
+        "timestamps.nuspec"
+      ]
+    },
+    "UrlMatcher/3.0.1": {
+      "sha512": "hHBZVzFSfikrx4XsRsnCIwmGLgbNKtntnlqf4z+ygcNA6Y/L/J0x5GiZZWfXdTfpxhy5v7mlt2zrZs/L9SvbOA==",
+      "type": "package",
+      "path": "urlmatcher/3.0.1",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "LICENSE.md",
+        "README.md",
+        "content/assets/icon.ico",
+        "contentFiles/any/net462/assets/icon.ico",
+        "contentFiles/any/net48/assets/icon.ico",
+        "contentFiles/any/net6.0/assets/icon.ico",
+        "contentFiles/any/net8.0/assets/icon.ico",
+        "contentFiles/any/netstandard2.0/assets/icon.ico",
+        "contentFiles/any/netstandard2.1/assets/icon.ico",
+        "icon.png",
+        "lib/net462/UrlMatcher.dll",
+        "lib/net462/UrlMatcher.xml",
+        "lib/net48/UrlMatcher.dll",
+        "lib/net48/UrlMatcher.xml",
+        "lib/net6.0/UrlMatcher.dll",
+        "lib/net6.0/UrlMatcher.xml",
+        "lib/net8.0/UrlMatcher.dll",
+        "lib/net8.0/UrlMatcher.xml",
+        "lib/netstandard2.0/UrlMatcher.dll",
+        "lib/netstandard2.0/UrlMatcher.xml",
+        "lib/netstandard2.1/UrlMatcher.dll",
+        "lib/netstandard2.1/UrlMatcher.xml",
+        "urlmatcher.3.0.1.nupkg.sha512",
+        "urlmatcher.nuspec"
+      ]
+    },
+    "Watson/6.4.0": {
+      "sha512": "+GrAn889LmtLbip6xpJxuxx2j8iCAZSeKaCPghfGrispyatv0zQmp+Bxpzek5fMe15AiVDk2AJnHGdk5P+PULA==",
+      "type": "package",
+      "path": "watson/6.4.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "LICENSE.md",
+        "README.md",
+        "lib/net462/WatsonWebserver.dll",
+        "lib/net462/WatsonWebserver.xml",
+        "lib/net48/WatsonWebserver.dll",
+        "lib/net48/WatsonWebserver.xml",
+        "lib/net6.0/WatsonWebserver.dll",
+        "lib/net6.0/WatsonWebserver.xml",
+        "lib/net8.0/WatsonWebserver.dll",
+        "lib/net8.0/WatsonWebserver.xml",
+        "lib/netstandard2.0/WatsonWebserver.dll",
+        "lib/netstandard2.0/WatsonWebserver.xml",
+        "lib/netstandard2.1/WatsonWebserver.dll",
+        "lib/netstandard2.1/WatsonWebserver.xml",
+        "watson.6.4.0.nupkg.sha512",
+        "watson.nuspec",
+        "watson.png"
+      ]
+    },
+    "Watson.Core/6.4.0": {
+      "sha512": "6cAdihyFuqLzNgSUe/qiXLXcQd44d/cA9F8y/2TBfv816+mO3uDyiiqlwwrzG4qRsGfFYtxU3Rnqi9Ahc1s0sw==",
+      "type": "package",
+      "path": "watson.core/6.4.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "LICENSE.md",
+        "README.md",
+        "content/Assets/watson.ico",
+        "contentFiles/any/net462/Assets/watson.ico",
+        "contentFiles/any/net48/Assets/watson.ico",
+        "contentFiles/any/net6.0/Assets/watson.ico",
+        "contentFiles/any/net8.0/Assets/watson.ico",
+        "contentFiles/any/netstandard2.0/Assets/watson.ico",
+        "contentFiles/any/netstandard2.1/Assets/watson.ico",
+        "lib/net462/WatsonWebserver.Core.dll",
+        "lib/net462/WatsonWebserver.Core.xml",
+        "lib/net48/WatsonWebserver.Core.dll",
+        "lib/net48/WatsonWebserver.Core.xml",
+        "lib/net6.0/WatsonWebserver.Core.dll",
+        "lib/net6.0/WatsonWebserver.Core.xml",
+        "lib/net8.0/WatsonWebserver.Core.dll",
+        "lib/net8.0/WatsonWebserver.Core.xml",
+        "lib/netstandard2.0/WatsonWebserver.Core.dll",
+        "lib/netstandard2.0/WatsonWebserver.Core.xml",
+        "lib/netstandard2.1/WatsonWebserver.Core.dll",
+        "lib/netstandard2.1/WatsonWebserver.Core.xml",
+        "watson.core.6.4.0.nupkg.sha512",
+        "watson.core.nuspec",
+        "watson.png"
+      ]
     }
   },
   "projectFileDependencyGroups": {
     "net8.0": [
-      "System.Management >= 7.0.2"
+      "SocketIOClient >= 3.1.2",
+      "System.Management >= 7.0.2",
+      "Watson >= 6.4.0"
     ]
   },
   "packageFolders": {
@@ -157,9 +674,17 @@
       "net8.0": {
         "targetAlias": "net8.0",
         "dependencies": {
+          "SocketIOClient": {
+            "target": "Package",
+            "version": "[3.1.2, )"
+          },
           "System.Management": {
             "target": "Package",
             "version": "[7.0.2, )"
+          },
+          "Watson": {
+            "target": "Package",
+            "version": "[6.4.0, )"
           }
         },
         "imports": [

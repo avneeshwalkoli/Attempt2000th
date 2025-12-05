@@ -6,7 +6,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
 // Simple signaling server simulation (replace with real WebSocket server)
-const SIGNALING_SERVER = 'ws://localhost:8080'; // Placeholder
+const SIGNALING_SERVER = import.meta.env.VITE_SOCKET_URL || 'https://anydesk.onrender.com';
 
 export function useMeeting(roomId, userId, isHost = false, externalStream = null, initialAudio = true, initialVideo = true) {
   const [localStream, setLocalStream] = useState(externalStream);

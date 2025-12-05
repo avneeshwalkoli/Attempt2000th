@@ -36,7 +36,7 @@ internal class Program
 
         // 4) Socket.IO client connect to backend (mock URL)
         _socketClient = new SocketClient(deviceId, _ipcServer);
-        await _socketClient.ConnectAsync("https://desklink.example.com");
+        await _socketClient.ConnectAsync("https://anydesk.onrender.com");
 
         Console.WriteLine("[DeskLinkAgent] Running. Press Ctrl+C to exit.");
 

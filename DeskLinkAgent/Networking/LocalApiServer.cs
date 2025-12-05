@@ -1,38 +1,46 @@
 using WatsonWebserver;
+using WatsonWebserver.Core;
 using System.Text;
 using System.Text.Json;
+using HttpMethod = WatsonWebserver.Core.HttpMethod;
 
 namespace DeskLinkAgent.Networking;
 
 public class LocalApiServer
 {
     private readonly string _deviceId;
-    private readonly Server _server;
+    private readonly Webserver _server;
 
     public const int Port = 17600;
 
     public LocalApiServer(string deviceId)
     {
         _deviceId = deviceId;
-        _server = new Server("127.0.0.1", Port, false, DefaultRoute);
-        _server.Routes = new WatsonWebserver.Routing.RouteManager(_server);
+        
+        WebserverSettings settings = new WebserverSettings
+        {
+            Hostname = "127.0.0.1",
+            Port = Port
+        };
+        
+        _server = new Webserver(settings, DefaultRoute);
 
-        _server.Routes.PreRouting = async (ctx) =>
+        _server.Routes.PreRouting = (HttpContextBase ctx) =>
         {
             // simple CORS for local usage
             ctx.Response.Headers.Add("Access-Control-Allow-Origin", "*");
             ctx.Response.Headers.Add("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
             ctx.Response.Headers.Add("Access-Control-Allow-Headers", "Content-Type");
-            if (ctx.Request.Method == "OPTIONS")
+            if (ctx.Request.Method == HttpMethod.OPTIONS)
             {
                 ctx.Response.StatusCode = 204;
-                await ctx.Response.Send();
-                return false; // skip routing
+                ctx.Response.Send().Wait();
+                return Task.FromResult(false); // skip routing
             }
-            return true;
+            return Task.FromResult(true);
         };
 
-        _server.Routes.Add(HttpMethod.GET, "/device-id", async (ctx) =>
+        _server.Routes.PreAuthentication.Static.Add(HttpMethod.GET, "/device-id", async (HttpContextBase ctx) =>
         {
             var payload = JsonSerializer.Serialize(new { deviceId = _deviceId });
             ctx.Response.StatusCode = 200;
@@ -40,14 +48,14 @@ public class LocalApiServer
             await ctx.Response.Send(payload);
         });
 
-        _server.Routes.Add(HttpMethod.POST, "/remote/start", async (ctx) =>
+        _server.Routes.PreAuthentication.Static.Add(HttpMethod.POST, "/remote/start", async (HttpContextBase ctx) =>
         {
             Console.WriteLine("[LocalApi] remote start requested");
             ctx.Response.StatusCode = 200;
             await ctx.Response.Send("OK");
         });
 
-        _server.Routes.Add(HttpMethod.POST, "/remote/stop", async (ctx) =>
+        _server.Routes.PreAuthentication.Static.Add(HttpMethod.POST, "/remote/stop", async (HttpContextBase ctx) =>
         {
             Console.WriteLine("[LocalApi] remote stop requested");
             ctx.Response.StatusCode = 200;

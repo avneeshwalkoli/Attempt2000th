@@ -1,7 +1,7 @@
 const AuthAPI = {
     async login(email, password) {
       try {
-        const res = await fetch("http://localhost:5000/auth/login", {
+        const res = await fetch("https://anydesk.onrender.com/api/auth/login", {
           method: "POST",
           headers: {"Content-Type": "application/json"},
           body: JSON.stringify({ email, password })
@@ -15,7 +15,7 @@ const AuthAPI = {
   
     async signup(name, email, password) {
       try {
-        const res = await fetch("http://localhost:5000/auth/signup", {
+        const res = await fetch("https://anydesk.onrender.com/api/auth/signup", {
           method: "POST",
           headers: {"Content-Type": "application/json"},
           body: JSON.stringify({ name, email, password })
