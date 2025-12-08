@@ -45,12 +45,7 @@ const ensureDeviceOwnership = async (deviceId, userId) => {
 const lastRequestAt = new Map();
 
 const requestRemoteSession = async (req, res) => {
-  let { fromUserId, fromDeviceId, toUserId, toDeviceId } = req.body;
-
-  // Default fromUserId to authenticated user if not explicitly passed
-  if (!fromUserId && req.user && req.user._id) {
-    fromUserId = String(req.user._id);
-  }
+  const { fromUserId, fromDeviceId, toUserId, toDeviceId } = req.body;
 
   if (!fromUserId || !fromDeviceId) {
     return res
@@ -64,7 +59,6 @@ const requestRemoteSession = async (req, res) => {
       .json({ message: 'Either toUserId or toDeviceId is required' });
   }
 
-  // Ensure the caller is the logged-in user
   if (String(req.user._id) !== String(fromUserId)) {
     return res
       .status(403)
@@ -72,20 +66,17 @@ const requestRemoteSession = async (req, res) => {
   }
 
   try {
-    // Simple rate limiting per caller
     const now = Date.now();
-    const key = String(fromUserId);
-    const lastAt = lastRequestAt.get(key) || 0;
+    const lastAt = lastRequestAt.get(String(fromUserId)) || 0;
     if (now - lastAt < 1000) {
       return res.status(429).json({ message: 'Too many requests' });
     }
-    lastRequestAt.set(key, now);
+    lastRequestAt.set(String(fromUserId), now);
 
-    // Ensure the caller owns the fromDeviceId
     await ensureDeviceOwnership(fromDeviceId, fromUserId);
 
-    let effectiveToUserId = toUserId || null;
-    let receiverDevice = null;
+    let effectiveToUserId = toUserId;
+    let receiverDevice;
 
     if (toDeviceId) {
       // 🔥 MANUAL DEVICE FLOW
@@ -101,27 +92,29 @@ const requestRemoteSession = async (req, res) => {
           .json({ message: 'Receiver device not found or offline' });
       }
 
-      // Map device -> user
+      if (!receiverDevice.userId) {
+        // 👉 This is the case that was giving you "null"
+        return res
+          .status(400)
+          .json({ message: 'Receiver device is not linked to any user' });
+      }
+
       effectiveToUserId = String(receiverDevice.userId);
     } else {
       // 🔥 CONTACT / USER FLOW
-      // Try contact link first
-      let link = await ContactLink.findOne({
+      receiverDevice = await ContactLink.findOne({
         ownerUserId: fromUserId,
         contactUserId: toUserId,
         blocked: false,
       });
 
-      if (link && link.contactDeviceId) {
+      if (receiverDevice) {
         receiverDevice = await Device.findOne({
-          deviceId: link.contactDeviceId,
+          deviceId: receiverDevice.contactDeviceId,
           deleted: false,
           blocked: false,
         });
-      }
-
-      // Fallback: last-known device for that user
-      if (!receiverDevice) {
+      } else {
         receiverDevice = await Device.findOne({
           userId: toUserId,
           deleted: false,
@@ -134,11 +127,8 @@ const requestRemoteSession = async (req, res) => {
           .status(404)
           .json({ message: 'Receiver device not found or offline' });
       }
-
-      effectiveToUserId = String(toUserId);
     }
 
-    // At this point effectiveToUserId MUST be set
     if (!effectiveToUserId) {
       return res.status(400).json({
         message:
@@ -146,7 +136,6 @@ const requestRemoteSession = async (req, res) => {
       });
     }
 
-    // Optional: block self-call if you don't want app-to-self
     if (String(fromUserId) === String(effectiveToUserId)) {
       return res
         .status(400)
@@ -156,7 +145,7 @@ const requestRemoteSession = async (req, res) => {
     const session = await RemoteSession.create({
       sessionId: new mongoose.Types.ObjectId().toString(),
       callerUserId: fromUserId,
-      receiverUserId: effectiveToUserId,              // ✅ always set
+      receiverUserId: effectiveToUserId,       // ✅ no longer "null"
       callerDeviceId: fromDeviceId,
       receiverDeviceId: receiverDevice.deviceId,
       status: 'pending',
@@ -171,18 +160,15 @@ const requestRemoteSession = async (req, res) => {
       receiverDeviceId: session.receiverDeviceId,
     };
 
-    // Notify all sockets for receiverUserId
     emitToUser(effectiveToUserId, 'desklink-remote-request', payload);
 
-    // (You were emitting twice with the same name; once is enough)
-    // emitToUser(effectiveToUserId, 'desklink-remote-request', payload);
-
-    return res.status(201).json({ session });
+    res.status(201).json({ session });
   } catch (error) {
     console.error('[requestRemoteSession] error', error);
-    return res.status(400).json({ message: error.message });
+    res.status(400).json({ message: error.message });
   }
 };
+
 
 
 /**
