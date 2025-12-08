@@ -7,6 +7,9 @@
   </PropertyGroup>
 
   <ItemGroup>
+  <Content Include="WebRTC\NodeHelper.js">
+    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+  </Content>
     <PackageReference Include="System.Management" Version="7.0.2" />
     <PackageReference Include="Watson" Version="6.4.0" />
     <PackageReference Include="SocketIOClient" Version="3.1.2" />

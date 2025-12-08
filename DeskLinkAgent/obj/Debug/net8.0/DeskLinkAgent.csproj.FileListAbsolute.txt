@@ -1,3 +1,4 @@
+C:\Users\yasha\OneDrive\Desktop\parattttt\VisionDesk__2.0\DeskLinkAgent\bin\Debug\net8.0\WebRTC\NodeHelper.js
 C:\Users\yasha\OneDrive\Desktop\parattttt\VisionDesk__2.0\DeskLinkAgent\bin\Debug\net8.0\DeskLinkAgent.exe
 C:\Users\yasha\OneDrive\Desktop\parattttt\VisionDesk__2.0\DeskLinkAgent\bin\Debug\net8.0\DeskLinkAgent.deps.json
 C:\Users\yasha\OneDrive\Desktop\parattttt\VisionDesk__2.0\DeskLinkAgent\bin\Debug\net8.0\DeskLinkAgent.runtimeconfig.json
