@@ -142,25 +142,26 @@ function createSocketServer(server, clientOrigin) {
         }
 
         await Device.updateOne(
-          { deviceId: devId },
-          {
-            $setOnInsert: {
-              deviceId: devId,
-              userId: userId,
-              deviceName: deviceName || label || 'Agent Device',
-              osInfo: osInfo || platform || 'Unknown',
-              platform: platform || '',
-              registeredAt: now,
-              deleted: false,
-              blocked: false,
-              label: label || 'Agent Device',
-            },
-            $set: {
-              lastOnline: now,
-            },
-          },
-          { upsert: true }
-        );
+  { deviceId: devId },
+  {
+    $setOnInsert: {
+      deviceId: devId,
+      registeredAt: now,
+    },
+    $set: {
+      userId: userId, // 🔥 always set/overwrite
+      deviceName: deviceName || label || 'Agent Device',
+      osInfo: osInfo || platform || 'Unknown',
+      platform: platform || '',
+      deleted: false,
+      blocked: false,
+      label: label || 'Agent Device',
+      lastOnline: now,
+    },
+  },
+  { upsert: true }
+);
+
 
         console.log('[device] registered/updated', devId, 'for user', userId || '(none)');
 
