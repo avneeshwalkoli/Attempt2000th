@@ -1,10 +1,11 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'https://anydesk.onrender.com';
 
 export function useDeskLinkSocket({ token, onRemoteRequest, onRemoteResponse }) {
   const socketRef = useRef(null);
+  const [socket, setSocket] = useState(null);
 
   useEffect(() => {
     const effectiveToken =
@@ -18,8 +19,7 @@ export function useDeskLinkSocket({ token, onRemoteRequest, onRemoteResponse }) 
       return;
     }
 
-    // Create socket with explicit path and reconnection options
-    const socket = io(SOCKET_URL, {
+    const s = io(SOCKET_URL, {
       auth: { token: effectiveToken },
       transports: ['websocket'],
       path: '/socket.io',
@@ -28,45 +28,56 @@ export function useDeskLinkSocket({ token, onRemoteRequest, onRemoteResponse }) 
       reconnectionAttempts: Infinity,
     });
 
-    // expose for debugging in dev
-    try { window.__desklinkSocket = socket; } catch (e) {}
+    socketRef.current = s;
+    setSocket(s); // 🔥 forces re-render with real socket
 
-    socketRef.current = socket;
+    try {
+      window.__desklinkSocket = s;
+    } catch (e) {}
 
-    socket.on('connect', () => {
-      console.log('[useDeskLinkSocket] connected', socket.id);
+    s.on('connect', () => {
+      console.log('[useDeskLinkSocket] connected', s.id);
     });
 
-    socket.on('disconnect', (reason) => {
+    s.on('disconnect', (reason) => {
       console.log('[useDeskLinkSocket] disconnected', reason);
     });
 
-    socket.on('connect_error', (err) => {
-      // err can be Error or object; log useful details
+    s.on('connect_error', (err) => {
       try {
-        console.error('[useDeskLinkSocket] connect_error', err && (err.message || JSON.stringify(err)));
+        console.error(
+          '[useDeskLinkSocket] connect_error',
+          err && (err.message || JSON.stringify(err))
+        );
       } catch (e) {
         console.error('[useDeskLinkSocket] connect_error', err);
       }
     });
 
     // app events
-    socket.on('desklink-remote-request', (payload) => {
+    s.on('desklink-remote-request', (payload) => {
+      console.log('[useDeskLinkSocket] remote-request', payload);
       onRemoteRequest?.(payload);
     });
 
-    socket.on('desklink-remote-response', (payload) => {
+    s.on('desklink-remote-response', (payload) => {
+      console.log('[useDeskLinkSocket] remote-response', payload);
       onRemoteResponse?.(payload);
     });
 
     return () => {
-      try { socket.disconnect(); } catch (e) { /* ignore */ }
-      if (window.__desklinkSocket === socket) {
-        try { window.__desklinkSocket = undefined; } catch (e) {}
-      } 
+      try {
+        s.disconnect();
+      } catch (e) {}
+      if (typeof window !== 'undefined' && window.__desklinkSocket === s) {
+        try {
+          window.__desklinkSocket = undefined;
+        } catch (e) {}
+      }
       socketRef.current = null;
+      setSocket(null);
     };
   }, [token, onRemoteRequest, onRemoteResponse]);
 
-  return { socket: socketRef.current };
+  return { socket };
 }

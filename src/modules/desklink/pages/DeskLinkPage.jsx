@@ -17,6 +17,7 @@ import {
 export default function DeskLinkPage() {
   const navigate = useNavigate();
   const { user, token } = useAuth();
+
   const [search, setSearch] = useState('');
   const [contacts, setContacts] = useState([]);
   const [selectedContactId, setSelectedContactId] = useState('');
@@ -35,6 +36,7 @@ export default function DeskLinkPage() {
     });
   }, [contacts, search]);
 
+  // Load native device id (from agent / bridge)
   useEffect(() => {
     const loadDeviceId = async () => {
       const id = await getNativeDeviceId();
@@ -45,6 +47,7 @@ export default function DeskLinkPage() {
     loadDeviceId();
   }, []);
 
+  // Load DeskLink contacts
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
@@ -62,16 +65,19 @@ export default function DeskLinkPage() {
     };
   }, [token]);
 
+  // Handle remote response (from other side)
   const handleRemoteResponse = useCallback(
     (payload) => {
       if (!pendingSession || payload.sessionId !== pendingSession.sessionId) {
         return;
       }
+
       setShowWaitingModal(false);
 
       if (payload.status === 'accepted') {
-        // Navigate to viewer page
-        navigate(`/workspace/desklink/viewer?sessionId=${payload.sessionId}&remoteDeviceId=${payload.receiverDeviceId}`);
+        navigate(
+          `/workspace/desklink/viewer?sessionId=${payload.sessionId}&remoteDeviceId=${payload.receiverDeviceId}`
+        );
       } else if (payload.status === 'rejected') {
         window.alert('Remote user rejected the DeskLink request.');
       }
@@ -80,9 +86,10 @@ export default function DeskLinkPage() {
         setPendingSession(null);
       }
     },
-    [pendingSession]
+    [pendingSession, navigate]
   );
 
+  // Handle incoming request event -> show modal
   const handleRemoteRequestEvent = useCallback((payload) => {
     setIncomingRequest({
       sessionId: payload.sessionId,
@@ -92,23 +99,62 @@ export default function DeskLinkPage() {
     });
   }, []);
 
-  useDeskLinkSocket({
+  // ✅ Initialize socket AFTER callbacks are defined
+  const { socket } = useDeskLinkSocket({
     token,
     onRemoteRequest: handleRemoteRequestEvent,
     onRemoteResponse: handleRemoteResponse,
   });
 
+  // ✅ Register this device on the socket, AFTER socket + localDeviceId exist
+  useEffect(() => {
+    if (!socket) return;
+    if (!localDeviceId) return;
+
+    console.log('[DeskLink] registering device on socket', localDeviceId);
+
+    socket.emit('register', {
+      deviceId: localDeviceId,
+      platform: 'web',
+      label: 'DeskLink Web',
+      osInfo: typeof window !== 'undefined' ? window.navigator.userAgent : 'unknown',
+      deviceName: user?.fullName || 'Web Client',
+    });
+  }, [socket, localDeviceId, user]);
+
   const sendRemoteRequest = async (contact) => {
-    if (!contact || !localDeviceId || !user) {
-      window.alert('Missing device ID or user context.');
+    if (!contact) {
+      console.warn('[DeskLink] sendRemoteRequest called without contact');
+      return;
+    }
+
+    const effectiveDeviceId =
+      localDeviceId || localStorage.getItem('desklinkDeviceId') || '';
+
+    const effectiveUser =
+      user ||
+      (() => {
+        try {
+          const raw = localStorage.getItem('vd_user_profile');
+          return raw ? JSON.parse(raw) : null;
+        } catch (e) {
+          return null;
+        }
+      })();
+
+    if (!effectiveDeviceId || !effectiveUser) {
+      console.warn('[DeskLink] Missing device ID or user context; remote request skipped');
+      console.log('[DeskLink] Debug - localDeviceId:', localDeviceId);
+      console.log('[DeskLink] Debug - user from context:', user);
+      console.log('[DeskLink] Debug - effectiveUser:', effectiveUser);
       return;
     }
 
     try {
       setShowWaitingModal(true);
       const { session } = await desklinkApi.requestRemote(token, {
-        fromUserId: user._id || user.id,
-        fromDeviceId: localDeviceId,
+        fromUserId: effectiveUser._id || effectiveUser.id,
+        fromDeviceId: effectiveDeviceId,
         toUserId: contact.contactUser.id,
       });
       setPendingSession(session);
@@ -126,19 +172,58 @@ export default function DeskLinkPage() {
 
   const handleManualRequest = async (deviceIdFromInput) => {
     const target = (deviceIdFromInput || '').trim();
-    if (!target) return;
-    if (!localDeviceId || !user) {
-      window.alert('Missing device ID or user context.');
+    if (!target) {
+      console.warn('[DeskLink] No target device ID provided');
+      return;
+    }
+
+    const effectiveDeviceId =
+      localDeviceId || localStorage.getItem('desklinkDeviceId') || '';
+
+    let effectiveUser = user;
+    if (!effectiveUser) {
+      try {
+        const raw = localStorage.getItem('vd_user_profile');
+        effectiveUser = raw ? JSON.parse(raw) : null;
+      } catch (e) {
+        console.error('[DeskLink] Failed to parse user from localStorage', e);
+        effectiveUser = null;
+      }
+    }
+
+    console.log('[DeskLink] Debug - localDeviceId:', localDeviceId);
+    console.log('[DeskLink] Debug - user from context:', user);
+    console.log('[DeskLink] Debug - effectiveUser:', effectiveUser);
+    console.log('[DeskLink] Debug - effectiveDeviceId:', effectiveDeviceId);
+    console.log('[DeskLink] Debug - token:', token);
+
+    if (!effectiveDeviceId) {
+      console.warn('[DeskLink] Missing device ID for manual request; skipped');
+      window.alert('Device ID not found. Please ensure the DeskLink Agent is running.');
+      return;
+    }
+
+    if (!effectiveUser) {
+      console.warn('[DeskLink] Missing user context for manual request; skipped');
+      window.alert('User context not found. Please try logging in again.');
+      return;
+    }
+
+    if (!token) {
+      console.warn('[DeskLink] Missing auth token for manual request; skipped');
+      window.alert('Authentication token not found. Please try logging in again.');
       return;
     }
 
     try {
+      console.log('[DeskLink] Sending remote request to device:', target);
       setShowWaitingModal(true);
       const { session } = await desklinkApi.requestRemote(token, {
-        fromUserId: user._id || user.id,
-        fromDeviceId: localDeviceId,
+        fromUserId: effectiveUser._id || effectiveUser.id,
+        fromDeviceId: effectiveDeviceId,
         toDeviceId: target,
       });
+      console.log('[DeskLink] Remote request successful, session:', session);
       setPendingSession(session);
     } catch (err) {
       console.error('DeskLink manual request failed', err);
@@ -228,4 +313,3 @@ export default function DeskLinkPage() {
     </div>
   );
 }
-
