@@ -175,7 +175,13 @@ const requestRemoteSession = async (req, res) => {
  * POST /api/remote/accept
  */
 const acceptRemoteSession = async (req, res) => {
-  const { sessionId, receiverDeviceId, permissions, selectedMonitor, resolution } = req.body;
+  const {
+    sessionId,
+    receiverDeviceId,
+    permissions,
+    selectedMonitor,
+    resolution,
+  } = req.body;
 
   if (!sessionId) {
     return res.status(400).json({ message: 'sessionId is required' });
@@ -192,17 +198,30 @@ const acceptRemoteSession = async (req, res) => {
     }
 
     if (String(session.receiverUserId) !== String(req.user._id)) {
-      return res.status(403).json({ message: 'Not authorized to accept this session' });
+      return res
+        .status(403)
+        .json({ message: 'Not authorized to accept this session' });
     }
 
+    // If host chooses a specific device, validate it but don't mess roles up
     if (receiverDeviceId) {
       await ensureDeviceOwnership(receiverDeviceId, req.user._id);
       session.receiverDeviceId = receiverDeviceId;
     }
 
     // Generate ephemeral session tokens for both parties
-    const callerToken = generateSessionToken(sessionId, session.callerUserId, session.callerDeviceId, 300);
-    const receiverToken = generateSessionToken(sessionId, session.receiverUserId, session.receiverDeviceId, 300);
+    const callerToken = generateSessionToken(
+      sessionId,
+      session.callerUserId,
+      session.callerDeviceId,
+      300
+    );
+    const receiverToken = generateSessionToken(
+      sessionId,
+      session.receiverUserId,
+      session.receiverDeviceId,
+      300
+    );
 
     // Update session with permissions and metadata
     session.status = 'accepted';
@@ -223,16 +242,16 @@ const acceptRemoteSession = async (req, res) => {
     });
     await session.save();
 
-    // Emit session start to both parties with full metadata
     const sessionMetadata = {
       sessionId: session.sessionId,
-      callerDeviceId: session.callerDeviceId,
-      receiverDeviceId: session.receiverDeviceId,
+      callerDeviceId: session.callerDeviceId,     // viewer
+      receiverDeviceId: session.receiverDeviceId, // host (agent)
       permissions: session.permissions,
       selectedMonitor: session.selectedMonitor,
       resolution: session.resolution,
     };
 
+    // Notify both sides
     emitToUser(session.callerUserId, 'desklink-session-start', {
       ...sessionMetadata,
       token: callerToken,
@@ -244,11 +263,12 @@ const acceptRemoteSession = async (req, res) => {
       role: 'receiver',
     });
 
-    // Legacy events for backward compatibility
+    // Legacy / compatibility events
     emitToUser(session.callerUserId, 'desklink-remote-response', {
       sessionId: session.sessionId,
       status: 'accepted',
-      receiverDeviceId: session.receiverDeviceId,
+      viewerDeviceId: session.callerDeviceId,     // 🔥 explicit
+      hostDeviceId: session.receiverDeviceId,     // 🔥 explicit (AGENT)
     });
     emitToUser(session.callerUserId, 'desklink-remote-accepted', {
       sessionId: session.sessionId,
@@ -260,6 +280,7 @@ const acceptRemoteSession = async (req, res) => {
     res.status(400).json({ message: error.message });
   }
 };
+
 
 /**
  * POST /api/remote/reject

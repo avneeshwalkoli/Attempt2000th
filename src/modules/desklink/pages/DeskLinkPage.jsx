@@ -67,27 +67,33 @@ export default function DeskLinkPage() {
 
   // Handle remote response (from other side)
   const handleRemoteResponse = useCallback(
-    (payload) => {
-      if (!pendingSession || payload.sessionId !== pendingSession.sessionId) {
-        return;
-      }
+  (payload) => {
+    if (!pendingSession || payload.sessionId !== pendingSession.sessionId) {
+      return;
+    }
 
-      setShowWaitingModal(false);
+    setShowWaitingModal(false);
 
-      if (payload.status === 'accepted') {
-        navigate(
-          `/workspace/desklink/viewer?sessionId=${payload.sessionId}&remoteDeviceId=${payload.receiverDeviceId}`
-        );
-      } else if (payload.status === 'rejected') {
-        window.alert('Remote user rejected the DeskLink request.');
-      }
+    if (payload.status === 'accepted') {
+      console.log('[DeskLink] remote-response payload', payload);
 
-      if (payload.status === 'ended') {
-        setPendingSession(null);
-      }
-    },
-    [pendingSession, navigate]
-  );
+      // 🔥 hostDeviceId = the machine we want to view / control
+      const remoteId = payload.hostDeviceId || payload.receiverDeviceId;
+
+      navigate(
+        `/workspace/desklink/viewer?sessionId=${payload.sessionId}&remoteDeviceId=${remoteId}`
+      );
+    } else if (payload.status === 'rejected') {
+      window.alert('Remote user rejected the DeskLink request.');
+    }
+
+    if (payload.status === 'ended') {
+      setPendingSession(null);
+    }
+  },
+  [pendingSession, navigate]
+);
+
 
   // Handle incoming request event -> show modal
   const handleRemoteRequestEvent = useCallback((payload) => {
