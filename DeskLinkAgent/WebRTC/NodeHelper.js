@@ -9,7 +9,6 @@
 
 const { RTCPeerConnection, RTCSessionDescription, RTCIceCandidate } = require('wrtc');
 const io = require('socket.io-client');
-const fetch = require('node-fetch');
 const robot = require('robotjs');
 const screenshot = require('screenshot-desktop');
 
@@ -239,8 +238,8 @@ function stopScreenCapture() {
  * Initialize Socket.IO connection
  */
 // NodeHelper.js
-const io = require('socket.io-client'); // ensure this is imported at top
-const fetch = require('node-fetch');    // if you need to fetch TURN token (node 18+ has global fetch)
+ // ensure this is imported at top
+   // if you need to fetch TURN token (node 18+ has global fetch)
 
 async function getIceServers(serverUrl, sessionToken) {
   try {

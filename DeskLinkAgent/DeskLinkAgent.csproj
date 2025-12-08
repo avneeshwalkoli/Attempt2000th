@@ -7,7 +7,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-  <Content Include="WebRTC\NodeHelper.js">
+   <Content Include="WebRTC\**\*">
     <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
   </Content>
     <PackageReference Include="System.Management" Version="7.0.2" />

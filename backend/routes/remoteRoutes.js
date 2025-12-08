@@ -20,24 +20,49 @@ router.post('/complete', protect, completeRemoteSession);
  * GET /api/remote/turn-token
  * Returns TURN/STUN configuration
  */
-router.get('/turn-token', protect, (req, res) => {
-  const username = req.user._id.toString();
-  const turnCreds = generateTurnCredentials(username, 86400);
+router.get('/turn-token',  (req, res) => {
+  try {
+    const username = req.user && req.user._id
+      ? req.user._id.toString()
+      : 'anonymous';
 
-  const iceServers = [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-  ];
+    const iceServers = [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+    ];
 
-  if (turnCreds && process.env.TURN_URL) {
-    iceServers.push({
-      urls: process.env.TURN_URL,
-      username: turnCreds.username,
-      credential: turnCreds.password,
+    const hasTurnEnv = process.env.TURN_URL && process.env.TURN_SECRET;
+
+    if (hasTurnEnv && username !== 'anonymous') {
+      try {
+        const turnCreds = generateTurnCredentials(username, 86400);
+
+        if (turnCreds) {
+          iceServers.push({
+            urls: process.env.TURN_URL,
+            username: turnCreds.username,
+            credential: turnCreds.password,
+          });
+        }
+      } catch (err) {
+        console.error('[TURN] generateTurnCredentials failed:', err.message);
+        // continue with STUN-only
+      }
+    } else {
+      console.warn('[TURN] TURN not configured, using STUN-only');
+    }
+
+    return res.json({ iceServers });
+  } catch (err) {
+    console.error('[TURN] /turn-token route error:', err);
+    // Still return STUN so WebRTC can function
+    return res.status(200).json({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+      ],
     });
   }
-
-  res.json({ iceServers });
 });
 
 module.exports = router;
