@@ -2,6 +2,14 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { io } from 'socket.io-client';
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'https://anydesk.onrender.com';
+const TURN_ICE_SERVERS = [
+  { urls: "stun:stun.l.google.com:19302" },
+  {
+    urls: "turn:avn.openai-coturn.workers.dev:443?transport=tcp",
+    username: "avneesh",
+    credential: "walkoli123",
+  },
+];
 
 /**
  * DeskLink WebRTC Hook for Remote Desktop Sessions
@@ -338,7 +346,8 @@ const pendingRemoteIceCandidatesRef = useRef([]);
 
 
         // Create peer connection AFTER sessionRef.role is set => creates DC as caller
-        const pc = await createPeerConnection(iceServers);
+        const pc = await createPeerConnection(TURN_ICE_SERVERS);
+
 
         // Create and send offer
         const offer = await pc.createOffer({

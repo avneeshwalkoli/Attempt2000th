@@ -20,6 +20,14 @@ const robot = require('robotjs');
 const screenshot = require('screenshot-desktop');
 const { PNG } = require('pngjs');   // for decoding PNG screenshots
 
+const TURN_ICE_SERVERS = [
+  { urls: "stun:stun.l.google.com:19302" },
+  {
+    urls: "turn:avn.openai-coturn.workers.dev:443?transport=tcp",
+    username: "avneesh",
+    credential: "walkoli123",
+  },
+];
 
 // Configuration from command line args
 const args = process.argv.slice(2);
@@ -325,23 +333,11 @@ function stopScreenCapture() {
 /**
  * Fetch TURN/STUN servers
  */
-async function getIceServers(serverUrl, sessionToken) {
-  try {
-    const res = await fetch(`${serverUrl}/api/remote/turn-token`, {
-      headers: { Authorization: `Bearer ${sessionToken}` },
-      timeout: 5000,
-    });
-    if (!res.ok) {
-      console.error('[TURN] turn-token fetch failed', res.status);
-      return [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }];
-    }
-    const body = await res.json();
-    return body.iceServers || [{ urls: 'stun:stun.l.google.com:19302' }];
-  } catch (err) {
-    console.error('[TURN] fetch error', err);
-    return [{ urls: 'stun:stun.l.google.com:19302' }];
-  }
+async function getIceServers() {
+  // For now we always use the hardcoded TURN servers.
+  return TURN_ICE_SERVERS;
 }
+
 
 /**
  * Initialize Socket.IO connection
@@ -375,7 +371,7 @@ function initSocket() {
 
     // 2. Fetch ICE Servers (TURN)
     // FIX 2: Caller now waits for this too
-    const iceServers = await getIceServers(config.serverUrl, config.agentJwt || config.token);
+   
     console.error('[Socket] obtained iceServers', JSON.stringify(iceServers));
     
     // FIX 1: Only init peer connection here, once.
@@ -428,7 +424,7 @@ socket.on('webrtc-offer', async ({ sdp, sessionId, fromUserId, fromDeviceId, toD
     // 🛡️ Guard: create a peerConnection if it does not exist yet
     if (!peerConnection) {
       console.error('[WebRTC] peerConnection is null in offer handler, creating with default ICE servers');
-      initPeerConnection(); // uses the default STUN config
+      initPeerConnection(TURN_ICE_SERVERS); // uses the default STUN config
     }
 
     await peerConnection.setRemoteDescription(
