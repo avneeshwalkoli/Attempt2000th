@@ -5,15 +5,10 @@
  * * This helper runs as a subprocess spawned by the C# agent and communicates via stdin/stdout.
  */
 
-const wrtc = require('wrtc');
-const { RTCPeerConnection, RTCSessionDescription, RTCIceCandidate } = wrtc;
-const { nonstandard } = wrtc;
-const { RTCVideoSource } = nonstandard;
-
+const { RTCPeerConnection, RTCSessionDescription, RTCIceCandidate } = require('wrtc');
 const io = require('socket.io-client');
 const robot = require('robotjs');
 const screenshot = require('screenshot-desktop');
-const { PNG } = require('pngjs');
 
 // Configuration from command line args
 const args = process.argv.slice(2);
@@ -35,27 +30,13 @@ let dataChannel = null;
 let socket = null;
 let screenCaptureInterval = null;
 let pendingRemoteIceCandidates = [];
-let videoSource = null;
-let videoTrack = null;
 /**
  * Initialize WebRTC peer connection
  */
 function initPeerConnection(iceServers = [{ urls: 'stun:stun.l.google.com:19302' }]) {
   console.error('[WebRTC] initPeerConnection with iceServers:', JSON.stringify(iceServers));
-
+  // FIX 1 & 2: Ensure we only create this once with the correct servers
   peerConnection = new RTCPeerConnection({ iceServers });
-
-  // 🔹 Create a video source + track and add it to the PC
-  try {
-    videoSource = new RTCVideoSource();
-    videoTrack = videoSource.createTrack();
-
-    // IMPORTANT: add track before we create answer/offer
-    peerConnection.addTrack(videoTrack);
-    console.error('[WebRTC] Video track created and added to PeerConnection');
-  } catch (e) {
-    console.error('[WebRTC] Failed to create video source/track:', e);
-  }
 
   peerConnection.onicecandidate = (event) => {
     if (event.candidate && socket) {
@@ -77,12 +58,6 @@ function initPeerConnection(iceServers = [{ urls: 'stun:stun.l.google.com:19302'
       if (config.role === 'receiver') {
         startScreenCapture();
       }
-    } else if (
-      peerConnection.connectionState === 'disconnected' ||
-      peerConnection.connectionState === 'failed' ||
-      peerConnection.connectionState === 'closed'
-    ) {
-      stopScreenCapture();
     }
   };
 
@@ -94,7 +69,6 @@ function initPeerConnection(iceServers = [{ urls: 'stun:stun.l.google.com:19302'
 
   return peerConnection;
 }
-
 
 /**
  * Setup data channel for control messages
@@ -244,44 +218,22 @@ function handleClipboard(message) {
  * Start screen capture and streaming
  */
 async function startScreenCapture() {
-  if (!videoSource) {
-    console.error('[Screen] No videoSource, cannot start capture');
-    return;
-  }
+  console.error('[Screen] Starting capture... (stubbed, no real video yet)');
+  // TEMP: disable screenshot-desktop loop
+  return;
 
-  if (screenCaptureInterval) {
-    console.error('[Screen] Capture already running, skipping');
-    return;
-  }
-
-  console.error('[Screen] Starting capture loop…');
-
-  const FPS = 5; // start low; you can bump to 10–15 later
-  const INTERVAL = 1000 / FPS;
-
+  // --- old prototype code below, keep for later reference ---
+  /*
   screenCaptureInterval = setInterval(async () => {
     try {
-      // Grab a screenshot as PNG buffer
       const imgBuffer = await screenshot({ format: 'png' });
-
-      // Decode PNG -> RGBA
-      const png = PNG.sync.read(imgBuffer);
-      const { width, height, data } = png; // data is RGBA buffer
-
-      if (!videoSource) return;
-
-      // Feed into WebRTC video source
-      videoSource.onFrame({
-        width,
-        height,
-        data, // MUST be RGBA
-      });
+      // TODO: encode as video and send via WebRTC video track
     } catch (err) {
       console.error('[Screen] Capture error:', err);
     }
-  }, INTERVAL);
+  }, 1000 / 15);
+  */
 }
-
 
 
 /**
@@ -394,40 +346,54 @@ function initSocket() {
     console.error('[Socket] Disconnected', reason);
   });
 
-  socket.on('webrtc-offer', async ({ sdp, sessionId, fromUserId, fromDeviceId, toDeviceId, token }) => {
-    console.error('[Socket] Received offer for session', sessionId);
-    try {
-      await peerConnection.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp }));
-
-      // 🔥 Now that remoteDescription is set, apply any buffered ICE candidates
-      if (pendingRemoteIceCandidates.length > 0) {
-        console.error('[WebRTC] Applying', pendingRemoteIceCandidates.length, 'buffered ICE candidates for session', sessionId);
-        for (const c of pendingRemoteIceCandidates) {
-          try {
-            await peerConnection.addIceCandidate(new RTCIceCandidate(c));
-          } catch (err) {
-            console.error('[WebRTC] Error applying buffered ICE candidate:', err);
-          }
-        }
-        pendingRemoteIceCandidates = [];
-      }
-
-      const answer = await peerConnection.createAnswer();
-      await peerConnection.setLocalDescription(answer);
-
-      socket.emit('webrtc-answer', {
-        sessionId,
-        fromUserId: config.userId,
-        fromDeviceId: config.deviceId,
-        toDeviceId: fromDeviceId, // reply to the caller
-        sdp: answer.sdp,
-        token: token || config.token
-      });
-      console.error('[Socket] sent webrtc-answer for', sessionId);
-    } catch (err) {
-      console.error('[WebRTC] Error handling offer:', err);
+socket.on('webrtc-offer', async ({ sdp, sessionId, fromUserId, fromDeviceId, toDeviceId, token }) => {
+  console.error('[Socket] Received offer for session', sessionId);
+  try {
+    // 🛡️ Guard: create a peerConnection if it does not exist yet
+    if (!peerConnection) {
+      console.error('[WebRTC] peerConnection is null in offer handler, creating with default ICE servers');
+      initPeerConnection(); // uses the default STUN config
     }
-  });
+
+    await peerConnection.setRemoteDescription(
+      new RTCSessionDescription({ type: 'offer', sdp })
+    );
+
+    // 🔥 Now that remoteDescription is set, apply any buffered ICE candidates
+    if (pendingRemoteIceCandidates.length > 0) {
+      console.error(
+        '[WebRTC] Applying',
+        pendingRemoteIceCandidates.length,
+        'buffered ICE candidates for session',
+        sessionId
+      );
+      for (const c of pendingRemoteIceCandidates) {
+        try {
+          await peerConnection.addIceCandidate(new RTCIceCandidate(c));
+        } catch (err) {
+          console.error('[WebRTC] Error applying buffered ICE candidate:', err);
+        }
+      }
+      pendingRemoteIceCandidates = [];
+    }
+
+    const answer = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
+
+    socket.emit('webrtc-answer', {
+      sessionId,
+      fromUserId: config.userId,
+      fromDeviceId: config.deviceId,
+      toDeviceId: fromDeviceId, // reply to the caller
+      sdp: answer.sdp,
+      token: token || config.token,
+    });
+    console.error('[Socket] sent webrtc-answer for', sessionId);
+  } catch (err) {
+    console.error('[WebRTC] Error handling offer:', err);
+  }
+});
+
 
 
   socket.on('webrtc-answer', async ({ sdp, sessionId }) => {

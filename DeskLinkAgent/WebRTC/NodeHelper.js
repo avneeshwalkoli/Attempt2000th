@@ -346,40 +346,54 @@ function initSocket() {
     console.error('[Socket] Disconnected', reason);
   });
 
-  socket.on('webrtc-offer', async ({ sdp, sessionId, fromUserId, fromDeviceId, toDeviceId, token }) => {
-    console.error('[Socket] Received offer for session', sessionId);
-    try {
-      await peerConnection.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp }));
-
-      // 🔥 Now that remoteDescription is set, apply any buffered ICE candidates
-      if (pendingRemoteIceCandidates.length > 0) {
-        console.error('[WebRTC] Applying', pendingRemoteIceCandidates.length, 'buffered ICE candidates for session', sessionId);
-        for (const c of pendingRemoteIceCandidates) {
-          try {
-            await peerConnection.addIceCandidate(new RTCIceCandidate(c));
-          } catch (err) {
-            console.error('[WebRTC] Error applying buffered ICE candidate:', err);
-          }
-        }
-        pendingRemoteIceCandidates = [];
-      }
-
-      const answer = await peerConnection.createAnswer();
-      await peerConnection.setLocalDescription(answer);
-
-      socket.emit('webrtc-answer', {
-        sessionId,
-        fromUserId: config.userId,
-        fromDeviceId: config.deviceId,
-        toDeviceId: fromDeviceId, // reply to the caller
-        sdp: answer.sdp,
-        token: token || config.token
-      });
-      console.error('[Socket] sent webrtc-answer for', sessionId);
-    } catch (err) {
-      console.error('[WebRTC] Error handling offer:', err);
+socket.on('webrtc-offer', async ({ sdp, sessionId, fromUserId, fromDeviceId, toDeviceId, token }) => {
+  console.error('[Socket] Received offer for session', sessionId);
+  try {
+    // 🛡️ Guard: create a peerConnection if it does not exist yet
+    if (!peerConnection) {
+      console.error('[WebRTC] peerConnection is null in offer handler, creating with default ICE servers');
+      initPeerConnection(); // uses the default STUN config
     }
-  });
+
+    await peerConnection.setRemoteDescription(
+      new RTCSessionDescription({ type: 'offer', sdp })
+    );
+
+    // 🔥 Now that remoteDescription is set, apply any buffered ICE candidates
+    if (pendingRemoteIceCandidates.length > 0) {
+      console.error(
+        '[WebRTC] Applying',
+        pendingRemoteIceCandidates.length,
+        'buffered ICE candidates for session',
+        sessionId
+      );
+      for (const c of pendingRemoteIceCandidates) {
+        try {
+          await peerConnection.addIceCandidate(new RTCIceCandidate(c));
+        } catch (err) {
+          console.error('[WebRTC] Error applying buffered ICE candidate:', err);
+        }
+      }
+      pendingRemoteIceCandidates = [];
+    }
+
+    const answer = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
+
+    socket.emit('webrtc-answer', {
+      sessionId,
+      fromUserId: config.userId,
+      fromDeviceId: config.deviceId,
+      toDeviceId: fromDeviceId, // reply to the caller
+      sdp: answer.sdp,
+      token: token || config.token,
+    });
+    console.error('[Socket] sent webrtc-answer for', sessionId);
+  } catch (err) {
+    console.error('[WebRTC] Error handling offer:', err);
+  }
+});
+
 
 
   socket.on('webrtc-answer', async ({ sdp, sessionId }) => {
