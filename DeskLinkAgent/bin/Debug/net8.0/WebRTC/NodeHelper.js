@@ -5,10 +5,21 @@
  * * This helper runs as a subprocess spawned by the C# agent and communicates via stdin/stdout.
  */
 
-const { RTCPeerConnection, RTCSessionDescription, RTCIceCandidate } = require('wrtc');
+/**
+ * DeskLink Agent - Node.js WebRTC Helper
+ * ...
+ */
+
+const wrtc = require('wrtc');
+const { RTCPeerConnection, RTCSessionDescription, RTCIceCandidate } = wrtc;
+const { nonstandard } = wrtc;
+const { RTCVideoSource } = nonstandard;
+
 const io = require('socket.io-client');
 const robot = require('robotjs');
 const screenshot = require('screenshot-desktop');
+const { PNG } = require('pngjs');   // for decoding PNG screenshots
+
 
 // Configuration from command line args
 const args = process.argv.slice(2);
@@ -30,6 +41,8 @@ let dataChannel = null;
 let socket = null;
 let screenCaptureInterval = null;
 let pendingRemoteIceCandidates = [];
+let videoSource = null;
+let videoTrack = null;
 /**
  * Initialize WebRTC peer connection
  */
@@ -66,7 +79,16 @@ function initPeerConnection(iceServers = [{ urls: 'stun:stun.l.google.com:19302'
     dataChannel = event.channel;
     setupDataChannel();
   };
-
+  if (config.role === 'receiver') {
+    try {
+      videoSource = new RTCVideoSource();
+      videoTrack = videoSource.createTrack();
+      const sender = peerConnection.addTrack(videoTrack);
+      console.error('[WebRTC] Video track added from agent:', sender.track.id);
+    } catch (err) {
+      console.error('[WebRTC] Error creating video track:', err);
+    }
+  }
   return peerConnection;
 }
 
@@ -218,22 +240,65 @@ function handleClipboard(message) {
  * Start screen capture and streaming
  */
 async function startScreenCapture() {
-  console.error('[Screen] Starting capture... (stubbed, no real video yet)');
-  // TEMP: disable screenshot-desktop loop
-  return;
+  if (!videoSource) {
+    console.error('[Screen] Cannot start capture: videoSource is not initialized');
+    return;
+  }
+  if (screenCaptureInterval) {
+    console.error('[Screen] Capture already running');
+    return;
+  }
 
-  // --- old prototype code below, keep for later reference ---
-  /*
+  console.error('[Screen] Starting capture loop...');
+  const FPS = 8;                // tweak as needed (8–15 is fine)
+  const interval = 1000 / FPS;
+
   screenCaptureInterval = setInterval(async () => {
     try {
+      // 1) Grab a screenshot as PNG buffer
       const imgBuffer = await screenshot({ format: 'png' });
-      // TODO: encode as video and send via WebRTC video track
+
+      // 2) Decode PNG into raw RGBA pixels
+      const png = PNG.sync.read(imgBuffer);
+      const { width, height, data: rgba } = png;
+
+      const frameSize = width * height;
+      const yPlaneSize = frameSize;
+      const uvPlaneSize = frameSize >> 2; // /4
+
+      // 3) Allocate I420 buffer: Y (full), U (1/4), V (1/4)
+      const i420 = Buffer.alloc(yPlaneSize + uvPlaneSize + uvPlaneSize);
+
+      // 4) Fill Y plane from RGB luma, ignore chroma (grayscale)
+      for (let i = 0; i < frameSize; i++) {
+        const r = rgba[i * 4];
+        const g = rgba[i * 4 + 1];
+        const b = rgba[i * 4 + 2];
+
+        // standard BT.601 luma approximation
+        let y = 0.257 * r + 0.504 * g + 0.098 * b + 16;
+        if (y < 0) y = 0;
+        if (y > 255) y = 255;
+
+        i420[i] = y;
+      }
+
+      // 5) Set U and V planes to neutral grey (128) → no color, just luma
+      i420.fill(128, yPlaneSize, yPlaneSize + uvPlaneSize + uvPlaneSize);
+
+      // 6) Push the frame to RTCVideoSource
+      videoSource.onFrame({
+        width,
+        height,
+        data: i420,   // YUV420p buffer, correct byteLength
+      });
     } catch (err) {
       console.error('[Screen] Capture error:', err);
     }
-  }, 1000 / 15);
-  */
+  }, interval);
 }
+
+
 
 
 /**
@@ -244,6 +309,17 @@ function stopScreenCapture() {
     clearInterval(screenCaptureInterval);
     screenCaptureInterval = null;
   }
+
+  if (videoTrack) {
+    try {
+      videoTrack.stop();
+    } catch (e) {
+      console.error('[Screen] Error stopping videoTrack:', e);
+    }
+    videoTrack = null;
+  }
+
+  videoSource = null;
 }
 
 /**

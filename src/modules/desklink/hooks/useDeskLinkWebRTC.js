@@ -17,6 +17,8 @@ export function useDeskLinkWebRTC() {
     fps: 0,
     packetsLost: 0,
   });
+const remoteStreamRef = useRef(null);
+const hasFiredConnectedRef = useRef(false);
 
   const pcRef = useRef(null);
   const dataChannelRef = useRef(null);
@@ -97,32 +99,56 @@ const pendingRemoteIceCandidatesRef = useRef([]);
       pcRef.current = pc;
 
       pc.onconnectionstatechange = () => {
-        setConnectionState(pc.connectionState);
-        console.log('[WebRTC] Connection state:', pc.connectionState);
+  setConnectionState(pc.connectionState);
+  console.log('[WebRTC] Connection state:', pc.connectionState);
 
-        if (pc.connectionState === 'connected') {
-          onConnectedRef.current?.(remoteStream);
-          startStatsCollection();
-        } else if (
-          pc.connectionState === 'disconnected' ||
-          pc.connectionState === 'failed' ||
-          pc.connectionState === 'closed'
-        ) {
-          onDisconnectedRef.current?.();
-          stopStatsCollection();
-        }
-      };
+  if (pc.connectionState === 'connected') {
+    startStatsCollection();
+  } else if (
+    pc.connectionState === 'disconnected' ||
+    pc.connectionState === 'failed' ||
+    pc.connectionState === 'closed'
+  ) {
+    onDisconnectedRef.current?.();
+    stopStatsCollection();
+  }
+};
+
 
       pc.oniceconnectionstatechange = () => {
         setIceConnectionState(pc.iceConnectionState);
         console.log('[WebRTC] ICE connection state:', pc.iceConnectionState);
       };
 
-      pc.ontrack = (event) => {
-        console.log('[WebRTC] Remote track received:', event.track.kind);
-        const [stream] = event.streams;
-        setRemoteStream(stream);
-      };
+  pc.ontrack = (event) => {
+  console.log('[WebRTC] Remote track received:', event.track.kind);
+
+  setRemoteStream((prev) => {
+    // Reuse existing stream if any, otherwise make a new one
+    const stream = prev || new MediaStream();
+
+    // Avoid adding the same track twice
+    const alreadyThere = stream.getTracks().some((t) => t.id === event.track.id);
+    if (!alreadyThere) {
+      stream.addTrack(event.track);
+    }
+
+    remoteStreamRef.current = stream;
+
+    // Fire onConnected callback ONCE when the first track arrives
+    if (!hasFiredConnectedRef.current && onConnectedRef.current) {
+      hasFiredConnectedRef.current = true;
+      try {
+        onConnectedRef.current(stream);
+      } catch (err) {
+        console.error('[WebRTC] Error in onConnected callback:', err);
+      }
+    }
+
+    return stream;
+  });
+};
+
 
       // Local ICE candidates → server
       pc.onicecandidate = (event) => {
@@ -203,7 +229,7 @@ const pendingRemoteIceCandidatesRef = useRef([]);
 
       return pc;
     },
-    [remoteStream, startStatsCollection, stopStatsCollection]
+    [ startStatsCollection, stopStatsCollection]
   );
 
   /**
@@ -464,44 +490,48 @@ const pendingRemoteIceCandidatesRef = useRef([]);
    * Stop session
    */
   const stopSession = useCallback(() => {
-    console.log('[WebRTC] Stopping session');
+  console.log('[WebRTC] Stopping session');
 
-    stopStatsCollection();
+  stopStatsCollection();
 
-    if (dataChannelRef.current) {
-      try {
-        dataChannelRef.current.close();
-      } catch (e) {
-        // ignore
-      }
-      dataChannelRef.current = null;
+  hasFiredConnectedRef.current = false;
+
+  if (dataChannelRef.current) {
+    try {
+      dataChannelRef.current.close();
+    } catch {}
+    dataChannelRef.current = null;
+  }
+
+  if (pcRef.current) {
+    try {
+      pcRef.current.close();
+    } catch {}
+    pcRef.current = null;
+  }
+
+  if (socketRef.current) {
+    if (sessionRef.current) {
+      socketRef.current.emit('webrtc-cancel', {
+        sessionId: sessionRef.current.sessionId,
+        fromUserId: sessionRef.current.localUserId,
+      });
     }
+    socketRef.current.disconnect();
+    socketRef.current = null;
+  }
 
-    if (pcRef.current) {
-      try {
-        pcRef.current.close();
-      } catch (e) {
-        // ignore
-      }
-      pcRef.current = null;
-    }
+  if (remoteStreamRef.current) {
+    remoteStreamRef.current.getTracks().forEach((t) => t.stop());
+    remoteStreamRef.current = null;
+  }
 
-    if (socketRef.current) {
-      if (sessionRef.current) {
-        socketRef.current.emit('webrtc-cancel', {
-          sessionId: sessionRef.current.sessionId,
-          fromUserId: sessionRef.current.localUserId,
-        });
-      }
-      socketRef.current.disconnect();
-      socketRef.current = null;
-    }
+  setRemoteStream(null);
+  setConnectionState('closed');
+  setIceConnectionState('closed');
+  sessionRef.current = null;
+}, [stopStatsCollection]);
 
-    setRemoteStream(null);
-    setConnectionState('closed');
-    setIceConnectionState('closed');
-    sessionRef.current = null;
-  }, [stopStatsCollection]);
 
   /**
    * Cleanup on unmount
