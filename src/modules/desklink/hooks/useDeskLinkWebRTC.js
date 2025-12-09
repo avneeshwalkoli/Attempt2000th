@@ -26,8 +26,10 @@ export function useDeskLinkWebRTC() {
    * Initialize RTCPeerConnection with STUN/TURN config
    */
   const createPeerConnection = useCallback(async (iceServers) => {
+    // FIX: Don't kill existing connection, reuse it
     if (pcRef.current) {
-      pcRef.current.close();
+      console.warn('[WebRTC] PeerConnection already exists, reusing existing one');
+      return pcRef.current;
     }
 
     const config = {
@@ -130,16 +132,32 @@ export function useDeskLinkWebRTC() {
    */
   const startAsCaller = useCallback(async ({ sessionId, token, localUserId, localDeviceId, remoteDeviceId, iceServers }) => {
     try {
+      // FIX: Guard against double-start
+      if (pcRef.current || socketRef.current) {
+        console.log('[WebRTC] Caller already started, skipping');
+        return;
+      }
+
       console.log('[WebRTC] Starting as caller');
 
       sessionRef.current = { sessionId, token, localUserId, localDeviceId, remoteDeviceId, role: 'caller' };
 
       // Connect socket
-      const socket = io(SOCKET_URL, {
-        auth: { token },
-        transports: ['websocket'],
-      });
-      socketRef.current = socket;
+     const socket = io(SOCKET_URL, {
+  auth: { token },
+  transports: ['websocket'],
+});
+socketRef.current = socket;
+
+// 🔑 register this socket with the deviceId so it can receive webrtc-answer / webrtc-ice
+socket.on('connect', () => {
+  console.log('[WebRTC] socket connected', socket.id);
+  if (localDeviceId) {
+    socket.emit('register', { deviceId: localDeviceId });
+    console.log('[WebRTC] register emitted for device', localDeviceId);
+  }
+});
+
 
       // Create peer connection
       const pc = await createPeerConnection(iceServers);
@@ -191,16 +209,31 @@ export function useDeskLinkWebRTC() {
    */
   const handleOffer = useCallback(async ({ sessionId, token, localUserId, localDeviceId, remoteDeviceId, sdp, iceServers }) => {
     try {
+      // FIX: Guard against double-start
+      if (pcRef.current || socketRef.current) {
+        console.log('[WebRTC] Receiver already started, skipping');
+        return;
+      }
+
       console.log('[WebRTC] Handling offer');
 
       sessionRef.current = { sessionId, token, localUserId, localDeviceId, remoteDeviceId, role: 'receiver' };
 
       // Connect socket
       const socket = io(SOCKET_URL, {
-        auth: { token },
-        transports: ['websocket'],
-      });
-      socketRef.current = socket;
+  auth: { token },
+  transports: ['websocket'],
+});
+socketRef.current = socket;
+
+socket.on('connect', () => {
+  console.log('[WebRTC] (receiver) socket connected', socket.id);
+  if (localDeviceId) {
+    socket.emit('register', { deviceId: localDeviceId });
+    console.log('[WebRTC] (receiver) register emitted for device', localDeviceId);
+  }
+});
+
 
       // Create peer connection
       const pc = await createPeerConnection(iceServers);
