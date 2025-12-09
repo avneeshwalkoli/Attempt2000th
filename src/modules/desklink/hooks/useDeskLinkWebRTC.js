@@ -79,7 +79,7 @@ export function useDeskLinkWebRTC() {
           fromDeviceId: localDeviceId,
           toDeviceId: remoteDeviceId,
           candidate: event.candidate,
-          token,
+        
         });
       }
     };
@@ -130,7 +130,8 @@ export function useDeskLinkWebRTC() {
   /**
    * Start as caller (controller)
    */
-  const startAsCaller = useCallback(async ({ sessionId, token, localUserId, localDeviceId, remoteDeviceId, iceServers }) => {
+  const startAsCaller = useCallback(
+  async ({ sessionId, authToken, localUserId, localDeviceId, remoteDeviceId, iceServers }) => {
     try {
       // FIX: Guard against double-start
       if (pcRef.current || socketRef.current) {
@@ -140,11 +141,11 @@ export function useDeskLinkWebRTC() {
 
       console.log('[WebRTC] Starting as caller');
 
-      sessionRef.current = { sessionId, token, localUserId, localDeviceId, remoteDeviceId, role: 'caller' };
+      sessionRef.current = { sessionId,  localUserId, localDeviceId, remoteDeviceId, role: 'caller' };
 
       // Connect socket
      const socket = io(SOCKET_URL, {
-  auth: { token },
+    auth: { token: authToken },
   transports: ['websocket'],
 });
 socketRef.current = socket;
@@ -194,7 +195,6 @@ socket.on('connect', () => {
         fromDeviceId: localDeviceId,
         toDeviceId: remoteDeviceId,
         sdp: offer.sdp,
-        token,
       });
 
       console.log('[WebRTC] Offer sent');
@@ -207,7 +207,7 @@ socket.on('connect', () => {
   /**
    * Handle incoming offer (receiver/host)
    */
-  const handleOffer = useCallback(async ({ sessionId, token, localUserId, localDeviceId, remoteDeviceId, sdp, iceServers }) => {
+  const handleOffer = useCallback(async ({ sessionId, authToken, localUserId, localDeviceId, remoteDeviceId, sdp, iceServers }) => {
     try {
       // FIX: Guard against double-start
       if (pcRef.current || socketRef.current) {
@@ -221,7 +221,7 @@ socket.on('connect', () => {
 
       // Connect socket
       const socket = io(SOCKET_URL, {
-  auth: { token },
+  auth: { token: authToken },
   transports: ['websocket'],
 });
 socketRef.current = socket;
@@ -258,7 +258,7 @@ socket.on('connect', () => {
         fromDeviceId: localDeviceId,
         toDeviceId: remoteDeviceId,
         sdp: answer.sdp,
-        token,
+       
       });
 
       console.log('[WebRTC] Answer sent');
