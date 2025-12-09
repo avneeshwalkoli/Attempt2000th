@@ -1,10 +1,8 @@
 /**
  * DeskLink Agent - Node.js WebRTC Helper
- * 
- * This is a prototype implementation using node-webrtc for rapid development.
+ * * This is a prototype implementation using node-webrtc for rapid development.
  * For production, consider using native WebRTC bindings (e.g., Microsoft MixedReality-WebRTC).
- * 
- * This helper runs as a subprocess spawned by the C# agent and communicates via stdin/stdout.
+ * * This helper runs as a subprocess spawned by the C# agent and communicates via stdin/stdout.
  */
 
 const { RTCPeerConnection, RTCSessionDescription, RTCIceCandidate } = require('wrtc');
@@ -22,7 +20,7 @@ const config = {
   userId: args[4],
   remoteDeviceId: args[5],
   role: args[6] || 'receiver', // 'caller' or 'receiver'
-  agentJwt: args[7],           // JWT for Socket.IO auth
+  agentJwt: args[7],          // JWT for Socket.IO auth
 };
 
 console.error('[NodeHelper] Starting with config:', JSON.stringify(config, null, 2));
@@ -32,17 +30,12 @@ let dataChannel = null;
 let socket = null;
 let screenCaptureInterval = null;
 
-// ICE servers configuration
-const iceServers = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-];
-
 /**
  * Initialize WebRTC peer connection
  */
 function initPeerConnection(iceServers = [{ urls: 'stun:stun.l.google.com:19302' }]) {
   console.error('[WebRTC] initPeerConnection with iceServers:', JSON.stringify(iceServers));
+  // FIX 1 & 2: Ensure we only create this once with the correct servers
   peerConnection = new RTCPeerConnection({ iceServers });
 
   peerConnection.onicecandidate = (event) => {
@@ -163,7 +156,6 @@ function handleMouseClick(message) {
  * Handle mouse wheel
  */
 function handleMouseWheel(message) {
-  // robotjs doesn't have native wheel support, would need platform-specific implementation
   console.error('[Control] Mouse wheel not implemented in this prototype');
 }
 
@@ -171,7 +163,6 @@ function handleMouseWheel(message) {
  * Handle key press
  */
 function handleKeyPress(message) {
-  // Safety: block dangerous key combinations
   if (message.modifiers?.ctrl && message.modifiers?.alt && message.key === 'Delete') {
     console.error('[Control] Blocked Ctrl+Alt+Del');
     return;
@@ -190,7 +181,6 @@ function handleKeyPress(message) {
  * Handle clipboard
  */
 function handleClipboard(message) {
-  // Clipboard sync would require platform-specific implementation
   console.error('[Control] Clipboard sync not implemented in this prototype');
 }
 
@@ -200,23 +190,12 @@ function handleClipboard(message) {
 async function startScreenCapture() {
   console.error('[Screen] Starting capture...');
 
-  // Note: This is a simplified prototype. For production:
-  // 1. Use hardware-accelerated encoding (H.264/VP8)
-  // 2. Implement proper MediaStreamTrack from canvas
-  // 3. Add frame rate control and quality settings
-
   screenCaptureInterval = setInterval(async () => {
     try {
       // Capture screenshot
       const imgBuffer = await screenshot({ format: 'png' });
       
-      // In a real implementation, you would:
-      // 1. Decode the image to raw frames
-      // 2. Encode to video codec (H.264/VP8)
-      // 3. Send via WebRTC video track
-      
-      // For this prototype, we're just demonstrating the capture
-      // You would need to create a MediaStreamTrack and add to peer connection
+      // Real implementation would encode/stream here
       
     } catch (err) {
       console.error('[Screen] Capture error:', err);
@@ -235,15 +214,10 @@ function stopScreenCapture() {
 }
 
 /**
- * Initialize Socket.IO connection
+ * Fetch TURN/STUN servers
  */
-// NodeHelper.js
- // ensure this is imported at top
-   // if you need to fetch TURN token (node 18+ has global fetch)
-
 async function getIceServers(serverUrl, sessionToken) {
   try {
-    // Try to fetch turn token from the central server (if endpoint exists)
     const res = await fetch(`${serverUrl}/api/remote/turn-token`, {
       headers: { Authorization: `Bearer ${sessionToken}` },
       timeout: 5000,
@@ -260,6 +234,9 @@ async function getIceServers(serverUrl, sessionToken) {
   }
 }
 
+/**
+ * Initialize Socket.IO connection
+ */
 function initSocket() {
   const authPayload = {
     token: config.agentJwt,
@@ -270,30 +247,61 @@ function initSocket() {
   socket = io(config.serverUrl, {
     auth: authPayload,
     transports: ['websocket'],
-    path: '/socket.io', // ensure server uses default path; adjust if your server uses a custom path
+    path: '/socket.io',
     reconnectionAttempts: Infinity,
     reconnectionDelay: 2000
   });
 
-  // helpful: log every event the socket receives
   socket.onAny((event, ...args) => {
     try { console.error('[Socket any]', event, args[0] ?? null); } catch(e){}
   });
 
   socket.on('connect', async () => {
     console.error('[Socket] Connected - id=', socket.id);
-    try {
-      // emit register so server maps deviceId -> socketId (important)
-      socket.emit('register', { deviceId: config.deviceId });
-      socket.emit('register-complete', { deviceId: config.deviceId }); // optional extra event if you want
-      console.error('[Socket] register emitted for', config.deviceId);
+    
+    // 1. Register device
+    socket.emit('register', { deviceId: config.deviceId });
+    socket.emit('register-complete', { deviceId: config.deviceId });
+    console.error('[Socket] register emitted for', config.deviceId);
 
-      // Optionally fetch TURN/STUN servers and initialize peer connection after socket connected
-      const iceServers = await getIceServers(config.serverUrl, config.token);
-      console.error('[Socket] obtained iceServers', JSON.stringify(iceServers));
-      initPeerConnection(iceServers); // you must adapt your initPeerConnection to accept iceServers
-    } catch (err) {
-      console.error('[Socket] error in connect handler', err);
+    // 2. Fetch ICE Servers (TURN)
+    // FIX 2: Caller now waits for this too
+    const iceServers = await getIceServers(config.serverUrl, config.agentJwt || config.token);
+    console.error('[Socket] obtained iceServers', JSON.stringify(iceServers));
+    
+    // FIX 1: Only init peer connection here, once.
+    if (!peerConnection) {
+      initPeerConnection(iceServers);
+    }
+
+    // FIX 2: If we are the Caller, create the offer NOW (after we have the correct ICE servers)
+    if (config.role === 'caller') {
+      try {
+        console.error('[NodeHelper] Creating DataChannel and Offer as Caller');
+        
+        dataChannel = peerConnection.createDataChannel('desklink-control', {
+          ordered: true,
+          maxRetransmits: 3,
+        });
+        setupDataChannel();
+
+        const offer = await peerConnection.createOffer({
+          offerToReceiveVideo: true,
+          offerToReceiveAudio: false,
+        });
+        await peerConnection.setLocalDescription(offer);
+
+        socket.emit('webrtc-offer', {
+          sessionId: config.sessionId,
+          fromUserId: config.userId,
+          fromDeviceId: config.deviceId,
+          toDeviceId: config.remoteDeviceId,
+          sdp: offer.sdp,
+          token: config.token,
+        });
+      } catch (err) {
+         console.error('[Caller] Error creating offer:', err);
+      }
     }
   });
 
@@ -308,6 +316,12 @@ function initSocket() {
   socket.on('webrtc-offer', async ({ sdp, sessionId, fromUserId, fromDeviceId, toDeviceId, token }) => {
     console.error('[Socket] Received offer for session', sessionId);
     try {
+      // Ensure peerConnection exists (it should, from connect handler)
+      if (!peerConnection) {
+         console.error('[WebRTC] Error: PeerConnection not initialized when offer received');
+         return;
+      }
+      
       await peerConnection.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp }));
       const answer = await peerConnection.createAnswer();
       await peerConnection.setLocalDescription(answer);
@@ -337,10 +351,11 @@ function initSocket() {
 
   socket.on('webrtc-ice', async ({ candidate, sessionId }) => {
     try {
-      // candidate may be null or malformed — guard it
       if (candidate && candidate.candidate) {
-        await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-        console.error('[Socket] added ICE candidate for session', sessionId);
+        if (peerConnection) {
+            await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+            console.error('[Socket] added ICE candidate for session', sessionId);
+        }
       }
     } catch (err) {
       console.error('[WebRTC] Error adding ICE candidate:', err);
@@ -362,32 +377,9 @@ function initSocket() {
  */
 async function startAsCaller() {
   console.error('[NodeHelper] Starting as caller');
-  
-  initPeerConnection();
+  // FIX 1 & 2: Removed initPeerConnection(). 
+  // It is now handled inside initSocket -> on('connect')
   initSocket();
-
-  // Create data channel
-  dataChannel = peerConnection.createDataChannel('desklink-control', {
-    ordered: true,
-    maxRetransmits: 3,
-  });
-  setupDataChannel();
-
-  // Create and send offer
-  const offer = await peerConnection.createOffer({
-    offerToReceiveVideo: true,
-    offerToReceiveAudio: false,
-  });
-  await peerConnection.setLocalDescription(offer);
-
-  socket.emit('webrtc-offer', {
-    sessionId: config.sessionId,
-    fromUserId: config.userId,
-    fromDeviceId: config.deviceId,
-    toDeviceId: config.remoteDeviceId,
-    sdp: offer.sdp,
-    token: config.token,
-  });
 }
 
 /**
@@ -395,11 +387,9 @@ async function startAsCaller() {
  */
 function startAsReceiver() {
   console.error('[NodeHelper] Starting as receiver');
-  
-  initPeerConnection();
+  // FIX 1 & 2: Removed initPeerConnection().
+  // It is now handled inside initSocket -> on('connect')
   initSocket();
-  
-  // Wait for offer from socket
 }
 
 /**
