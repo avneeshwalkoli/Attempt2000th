@@ -17,7 +17,6 @@ export default function RemoteViewerPage() {
   const remoteDeviceId = searchParams.get('remoteDeviceId');
 
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [sessionToken, setSessionToken] = useState(null);
   const [localDeviceId, setLocalDeviceId] = useState('');
   const [permissions, setPermissions] = useState({ allowControl: true });
   const [iceServers, setIceServers] = useState(null);
@@ -35,12 +34,12 @@ export default function RemoteViewerPage() {
     setOnDisconnected,
   } = useDeskLinkWebRTC();
 
+  // 1) Get local deviceId + TURN config
   useEffect(() => {
     const init = async () => {
       const deviceId = await getNativeDeviceId();
       setLocalDeviceId(deviceId);
 
-      // Fetch TURN/STUN config
       try {
         const config = await desklinkApi.getTurnToken(token);
         setIceServers(config.iceServers);
@@ -51,20 +50,29 @@ export default function RemoteViewerPage() {
     init();
   }, [token]);
 
+  // 2) Start WebRTC caller once we have everything
   useEffect(() => {
     if (!sessionId || !remoteDeviceId || !localDeviceId || !user || !iceServers) return;
 
-    // Start WebRTC as caller
     startAsCaller({
       sessionId,
-      token: sessionToken || token,
-      localUserId: user._id || user.id,
+      authToken: token, // user JWT for socket auth
+      localUserId: user?._id ?? user?.id,
       localDeviceId,
       remoteDeviceId,
       iceServers,
     });
-  }, [sessionId, remoteDeviceId, localDeviceId, user, sessionToken, token, iceServers, startAsCaller]);
+  }, [
+    sessionId,
+    remoteDeviceId,
+    localDeviceId,
+    user,
+    token,
+    iceServers,
+    startAsCaller,
+  ]);
 
+  // 3) Hook up connection/DataChannel callbacks
   useEffect(() => {
     setOnConnected((stream) => {
       console.log('[Viewer] Connected, stream:', stream);
@@ -80,6 +88,7 @@ export default function RemoteViewerPage() {
     });
   }, [setOnConnected, setOnDisconnected, setOnDataMessage]);
 
+  // 4) End session
   const handleEnd = useCallback(async () => {
     stopSession();
     try {
@@ -90,6 +99,7 @@ export default function RemoteViewerPage() {
     navigate('/desklink');
   }, [stopSession, token, sessionId, navigate]);
 
+  // 5) Fullscreen toggle
   const handleToggleFullscreen = useCallback(() => {
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen();
@@ -100,6 +110,7 @@ export default function RemoteViewerPage() {
     }
   }, []);
 
+  // 6) Relay control messages from RemoteVideoArea
   const handleControlMessage = useCallback(
     (message) => {
       sendControlMessage(message);
@@ -107,11 +118,12 @@ export default function RemoteViewerPage() {
     [sendControlMessage]
   );
 
+  // 7) Global keyboard -> control protocol
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (!permissions?.allowControl) return;
 
-      // Prevent default for common shortcuts
+      // Prevent browser shortcuts so they go to remote
       if (e.ctrlKey || e.metaKey || e.altKey) {
         e.preventDefault();
       }
@@ -126,15 +138,17 @@ export default function RemoteViewerPage() {
           meta: e.metaKey,
         },
         sessionId,
-        sessionToken || token
+        token // no sessionToken here; we’re fine with JWT
       );
+
       sendControlMessage(message);
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [permissions, sessionId, sessionToken, token, sendControlMessage]);
+  }, [permissions, sessionId, token, sendControlMessage]);
 
+  // 8) Guard: missing params
   if (!sessionId || !remoteDeviceId) {
     return (
       <div className="min-h-screen w-full bg-slate-950 text-slate-50 flex items-center justify-center">
@@ -169,7 +183,7 @@ export default function RemoteViewerPage() {
               stream={remoteStream}
               onControlMessage={handleControlMessage}
               sessionId={sessionId}
-              token={sessionToken || token}
+              token={token}
               permissions={permissions}
               stats={stats}
             />

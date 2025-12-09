@@ -29,7 +29,7 @@ let peerConnection = null;
 let dataChannel = null;
 let socket = null;
 let screenCaptureInterval = null;
-
+let pendingRemoteIceCandidates = [];
 /**
  * Initialize WebRTC peer connection
  */
@@ -162,6 +162,25 @@ function handleMouseWheel(message) {
 /**
  * Handle key press
  */
+const KEY_MAP = {
+  ArrowUp: 'up',
+  ArrowDown: 'down',
+  ArrowLeft: 'left',
+  ArrowRight: 'right',
+  Enter: 'enter',
+  Backspace: 'backspace',
+  Escape: 'escape',
+  // letters + numbers – robot expects lowercase
+};
+
+function normalizeKey(key) {
+  if (!key) return null;
+  if (KEY_MAP[key]) return KEY_MAP[key];
+  if (/^[A-Z]$/.test(key)) return key.toLowerCase();
+  if (/^\d$/.test(key)) return key;
+  return null; // unsupported
+}
+
 function handleKeyPress(message) {
   if (message.modifiers?.ctrl && message.modifiers?.alt && message.key === 'Delete') {
     console.error('[Control] Blocked Ctrl+Alt+Del');
@@ -170,12 +189,23 @@ function handleKeyPress(message) {
 
   try {
     if (message.action === 'press') {
-      robot.keyTap(message.key, Object.keys(message.modifiers || {}).filter(k => message.modifiers[k]));
+      const key = normalizeKey(message.key);
+      if (!key) {
+        console.error('[Control] Unsupported key from client:', message.key);
+        return;
+      }
+
+      const mods = Object.keys(message.modifiers || {}).filter(
+        (k) => message.modifiers[k]
+      );
+
+      robot.keyTap(key, mods);
     }
   } catch (err) {
     console.error('[Control] Error handling key press:', err);
   }
 }
+
 
 /**
  * Handle clipboard
@@ -188,20 +218,23 @@ function handleClipboard(message) {
  * Start screen capture and streaming
  */
 async function startScreenCapture() {
-  console.error('[Screen] Starting capture...');
+  console.error('[Screen] Starting capture... (stubbed, no real video yet)');
+  // TEMP: disable screenshot-desktop loop
+  return;
 
+  // --- old prototype code below, keep for later reference ---
+  /*
   screenCaptureInterval = setInterval(async () => {
     try {
-      // Capture screenshot
       const imgBuffer = await screenshot({ format: 'png' });
-      
-      // Real implementation would encode/stream here
-      
+      // TODO: encode as video and send via WebRTC video track
     } catch (err) {
       console.error('[Screen] Capture error:', err);
     }
-  }, 1000 / 15); // 15 FPS
+  }, 1000 / 15);
+  */
 }
+
 
 /**
  * Stop screen capture
@@ -316,13 +349,21 @@ function initSocket() {
   socket.on('webrtc-offer', async ({ sdp, sessionId, fromUserId, fromDeviceId, toDeviceId, token }) => {
     console.error('[Socket] Received offer for session', sessionId);
     try {
-      // Ensure peerConnection exists (it should, from connect handler)
-      if (!peerConnection) {
-         console.error('[WebRTC] Error: PeerConnection not initialized when offer received');
-         return;
-      }
-      
       await peerConnection.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp }));
+
+      // 🔥 Now that remoteDescription is set, apply any buffered ICE candidates
+      if (pendingRemoteIceCandidates.length > 0) {
+        console.error('[WebRTC] Applying', pendingRemoteIceCandidates.length, 'buffered ICE candidates for session', sessionId);
+        for (const c of pendingRemoteIceCandidates) {
+          try {
+            await peerConnection.addIceCandidate(new RTCIceCandidate(c));
+          } catch (err) {
+            console.error('[WebRTC] Error applying buffered ICE candidate:', err);
+          }
+        }
+        pendingRemoteIceCandidates = [];
+      }
+
       const answer = await peerConnection.createAnswer();
       await peerConnection.setLocalDescription(answer);
 
@@ -340,6 +381,7 @@ function initSocket() {
     }
   });
 
+
   socket.on('webrtc-answer', async ({ sdp, sessionId }) => {
     console.error('[Socket] Received answer for session', sessionId);
     try {
@@ -349,18 +391,25 @@ function initSocket() {
     }
   });
 
-  socket.on('webrtc-ice', async ({ candidate, sessionId }) => {
+    socket.on('webrtc-ice', async ({ candidate, sessionId }) => {
     try {
-      if (candidate && candidate.candidate) {
-        if (peerConnection) {
-            await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-            console.error('[Socket] added ICE candidate for session', sessionId);
-        }
+      // candidate may be null or malformed — guard it
+      if (!candidate || !candidate.candidate) return;
+
+      // If remoteDescription is not set yet, buffer the candidate
+      if (!peerConnection || !peerConnection.remoteDescription) {
+        pendingRemoteIceCandidates.push(candidate);
+        console.error('[WebRTC] Buffering ICE candidate (no remoteDescription yet) for session', sessionId);
+        return;
       }
+
+      await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+      console.error('[Socket] added ICE candidate for session', sessionId);
     } catch (err) {
       console.error('[WebRTC] Error adding ICE candidate:', err);
     }
   });
+
 
   socket.on('webrtc-cancel', () => {
     console.error('[Socket] Session cancelled');
@@ -399,7 +448,7 @@ function cleanup() {
   console.error('[NodeHelper] Cleaning up...');
   
   stopScreenCapture();
-  
+   pendingRemoteIceCandidates = [];  
   if (dataChannel) {
     dataChannel.close();
   }

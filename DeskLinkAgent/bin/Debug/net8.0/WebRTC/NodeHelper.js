@@ -5,10 +5,15 @@
  * * This helper runs as a subprocess spawned by the C# agent and communicates via stdin/stdout.
  */
 
-const { RTCPeerConnection, RTCSessionDescription, RTCIceCandidate } = require('wrtc');
+const wrtc = require('wrtc');
+const { RTCPeerConnection, RTCSessionDescription, RTCIceCandidate } = wrtc;
+const { nonstandard } = wrtc;
+const { RTCVideoSource } = nonstandard;
+
 const io = require('socket.io-client');
 const robot = require('robotjs');
 const screenshot = require('screenshot-desktop');
+const { PNG } = require('pngjs');
 
 // Configuration from command line args
 const args = process.argv.slice(2);
@@ -29,14 +34,28 @@ let peerConnection = null;
 let dataChannel = null;
 let socket = null;
 let screenCaptureInterval = null;
-
+let pendingRemoteIceCandidates = [];
+let videoSource = null;
+let videoTrack = null;
 /**
  * Initialize WebRTC peer connection
  */
 function initPeerConnection(iceServers = [{ urls: 'stun:stun.l.google.com:19302' }]) {
   console.error('[WebRTC] initPeerConnection with iceServers:', JSON.stringify(iceServers));
-  // FIX 1 & 2: Ensure we only create this once with the correct servers
+
   peerConnection = new RTCPeerConnection({ iceServers });
+
+  // 🔹 Create a video source + track and add it to the PC
+  try {
+    videoSource = new RTCVideoSource();
+    videoTrack = videoSource.createTrack();
+
+    // IMPORTANT: add track before we create answer/offer
+    peerConnection.addTrack(videoTrack);
+    console.error('[WebRTC] Video track created and added to PeerConnection');
+  } catch (e) {
+    console.error('[WebRTC] Failed to create video source/track:', e);
+  }
 
   peerConnection.onicecandidate = (event) => {
     if (event.candidate && socket) {
@@ -58,6 +77,12 @@ function initPeerConnection(iceServers = [{ urls: 'stun:stun.l.google.com:19302'
       if (config.role === 'receiver') {
         startScreenCapture();
       }
+    } else if (
+      peerConnection.connectionState === 'disconnected' ||
+      peerConnection.connectionState === 'failed' ||
+      peerConnection.connectionState === 'closed'
+    ) {
+      stopScreenCapture();
     }
   };
 
@@ -69,6 +94,7 @@ function initPeerConnection(iceServers = [{ urls: 'stun:stun.l.google.com:19302'
 
   return peerConnection;
 }
+
 
 /**
  * Setup data channel for control messages
@@ -162,6 +188,25 @@ function handleMouseWheel(message) {
 /**
  * Handle key press
  */
+const KEY_MAP = {
+  ArrowUp: 'up',
+  ArrowDown: 'down',
+  ArrowLeft: 'left',
+  ArrowRight: 'right',
+  Enter: 'enter',
+  Backspace: 'backspace',
+  Escape: 'escape',
+  // letters + numbers – robot expects lowercase
+};
+
+function normalizeKey(key) {
+  if (!key) return null;
+  if (KEY_MAP[key]) return KEY_MAP[key];
+  if (/^[A-Z]$/.test(key)) return key.toLowerCase();
+  if (/^\d$/.test(key)) return key;
+  return null; // unsupported
+}
+
 function handleKeyPress(message) {
   if (message.modifiers?.ctrl && message.modifiers?.alt && message.key === 'Delete') {
     console.error('[Control] Blocked Ctrl+Alt+Del');
@@ -170,12 +215,23 @@ function handleKeyPress(message) {
 
   try {
     if (message.action === 'press') {
-      robot.keyTap(message.key, Object.keys(message.modifiers || {}).filter(k => message.modifiers[k]));
+      const key = normalizeKey(message.key);
+      if (!key) {
+        console.error('[Control] Unsupported key from client:', message.key);
+        return;
+      }
+
+      const mods = Object.keys(message.modifiers || {}).filter(
+        (k) => message.modifiers[k]
+      );
+
+      robot.keyTap(key, mods);
     }
   } catch (err) {
     console.error('[Control] Error handling key press:', err);
   }
 }
+
 
 /**
  * Handle clipboard
@@ -188,20 +244,45 @@ function handleClipboard(message) {
  * Start screen capture and streaming
  */
 async function startScreenCapture() {
-  console.error('[Screen] Starting capture...');
+  if (!videoSource) {
+    console.error('[Screen] No videoSource, cannot start capture');
+    return;
+  }
+
+  if (screenCaptureInterval) {
+    console.error('[Screen] Capture already running, skipping');
+    return;
+  }
+
+  console.error('[Screen] Starting capture loop…');
+
+  const FPS = 5; // start low; you can bump to 10–15 later
+  const INTERVAL = 1000 / FPS;
 
   screenCaptureInterval = setInterval(async () => {
     try {
-      // Capture screenshot
+      // Grab a screenshot as PNG buffer
       const imgBuffer = await screenshot({ format: 'png' });
-      
-      // Real implementation would encode/stream here
-      
+
+      // Decode PNG -> RGBA
+      const png = PNG.sync.read(imgBuffer);
+      const { width, height, data } = png; // data is RGBA buffer
+
+      if (!videoSource) return;
+
+      // Feed into WebRTC video source
+      videoSource.onFrame({
+        width,
+        height,
+        data, // MUST be RGBA
+      });
     } catch (err) {
       console.error('[Screen] Capture error:', err);
     }
-  }, 1000 / 15); // 15 FPS
+  }, INTERVAL);
 }
+
+
 
 /**
  * Stop screen capture
@@ -316,13 +397,21 @@ function initSocket() {
   socket.on('webrtc-offer', async ({ sdp, sessionId, fromUserId, fromDeviceId, toDeviceId, token }) => {
     console.error('[Socket] Received offer for session', sessionId);
     try {
-      // Ensure peerConnection exists (it should, from connect handler)
-      if (!peerConnection) {
-         console.error('[WebRTC] Error: PeerConnection not initialized when offer received');
-         return;
-      }
-      
       await peerConnection.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp }));
+
+      // 🔥 Now that remoteDescription is set, apply any buffered ICE candidates
+      if (pendingRemoteIceCandidates.length > 0) {
+        console.error('[WebRTC] Applying', pendingRemoteIceCandidates.length, 'buffered ICE candidates for session', sessionId);
+        for (const c of pendingRemoteIceCandidates) {
+          try {
+            await peerConnection.addIceCandidate(new RTCIceCandidate(c));
+          } catch (err) {
+            console.error('[WebRTC] Error applying buffered ICE candidate:', err);
+          }
+        }
+        pendingRemoteIceCandidates = [];
+      }
+
       const answer = await peerConnection.createAnswer();
       await peerConnection.setLocalDescription(answer);
 
@@ -340,6 +429,7 @@ function initSocket() {
     }
   });
 
+
   socket.on('webrtc-answer', async ({ sdp, sessionId }) => {
     console.error('[Socket] Received answer for session', sessionId);
     try {
@@ -349,18 +439,25 @@ function initSocket() {
     }
   });
 
-  socket.on('webrtc-ice', async ({ candidate, sessionId }) => {
+    socket.on('webrtc-ice', async ({ candidate, sessionId }) => {
     try {
-      if (candidate && candidate.candidate) {
-        if (peerConnection) {
-            await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-            console.error('[Socket] added ICE candidate for session', sessionId);
-        }
+      // candidate may be null or malformed — guard it
+      if (!candidate || !candidate.candidate) return;
+
+      // If remoteDescription is not set yet, buffer the candidate
+      if (!peerConnection || !peerConnection.remoteDescription) {
+        pendingRemoteIceCandidates.push(candidate);
+        console.error('[WebRTC] Buffering ICE candidate (no remoteDescription yet) for session', sessionId);
+        return;
       }
+
+      await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+      console.error('[Socket] added ICE candidate for session', sessionId);
     } catch (err) {
       console.error('[WebRTC] Error adding ICE candidate:', err);
     }
   });
+
 
   socket.on('webrtc-cancel', () => {
     console.error('[Socket] Session cancelled');
@@ -399,7 +496,7 @@ function cleanup() {
   console.error('[NodeHelper] Cleaning up...');
   
   stopScreenCapture();
-  
+   pendingRemoteIceCandidates = [];  
   if (dataChannel) {
     dataChannel.close();
   }
