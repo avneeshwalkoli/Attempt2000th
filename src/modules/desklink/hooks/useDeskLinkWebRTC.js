@@ -86,159 +86,173 @@ const pendingRemoteIceCandidatesRef = useRef([]);
   /**
    * Initialize RTCPeerConnection with STUN/TURN config
    */
-  const createPeerConnection = useCallback(
-    async (iceServers) => {
-      // Reuse an existing PC if present (prevents double-creation)
-      if (pcRef.current) {
-        console.warn('[WebRTC] PeerConnection already exists, reusing existing one');
-        return pcRef.current;
-      }
-
-      const config = {
-        iceServers:
-          iceServers || [
-            { urls: 'stun:stun.l.google.com:19302' },
-            { urls: 'stun:stun1.l.google.com:19302' },
-          ],
-        iceCandidatePoolSize: 10,
-      };
-
-      const pc = new RTCPeerConnection(config);
-      pcRef.current = pc;
-
-      pc.onconnectionstatechange = () => {
-  setConnectionState(pc.connectionState);
-  console.log('[WebRTC] Connection state:', pc.connectionState);
-
-  if (pc.connectionState === 'connected') {
-    startStatsCollection();
-  } else if (
-    pc.connectionState === 'disconnected' ||
-    pc.connectionState === 'failed' ||
-    pc.connectionState === 'closed'
-  ) {
-    onDisconnectedRef.current?.();
-    stopStatsCollection();
-  }
-};
-
-
-      pc.oniceconnectionstatechange = () => {
-        setIceConnectionState(pc.iceConnectionState);
-        console.log('[WebRTC] ICE connection state:', pc.iceConnectionState);
-      };
-
-  pc.ontrack = (event) => {
-  console.log('[WebRTC] Remote track received:', event.track.kind);
-
-  setRemoteStream((prev) => {
-    // Reuse existing stream if any, otherwise make a new one
-    const stream = prev || new MediaStream();
-
-    // Avoid adding the same track twice
-    const alreadyThere = stream.getTracks().some((t) => t.id === event.track.id);
-    if (!alreadyThere) {
-      stream.addTrack(event.track);
+ const createPeerConnection = useCallback(
+  async (iceServers) => {
+    // Reuse an existing PC if present (prevents double-creation)
+    if (pcRef.current) {
+      console.warn('[WebRTC] PeerConnection already exists, reusing existing one');
+      return pcRef.current;
     }
 
-    remoteStreamRef.current = stream;
+    const config = {
+      iceServers:
+        iceServers || [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+        ],
+      iceCandidatePoolSize: 10,
+    };
 
-    // Fire onConnected callback ONCE when the first track arrives
-    if (!hasFiredConnectedRef.current && onConnectedRef.current) {
-      hasFiredConnectedRef.current = true;
-      try {
-        onConnectedRef.current(stream);
-      } catch (err) {
-        console.error('[WebRTC] Error in onConnected callback:', err);
+    const pc = new RTCPeerConnection(config);
+    pcRef.current = pc;
+
+    pc.onconnectionstatechange = () => {
+      setConnectionState(pc.connectionState);
+      console.log('[WebRTC] Connection state:', pc.connectionState);
+
+      if (pc.connectionState === 'connected') {
+        // Start stats when connected
+        startStatsCollection();
+
+        // 🔥 Extra: if stream already arrived, fire onConnected once
+        if (
+          remoteStreamRef.current &&
+          !hasFiredConnectedRef.current &&
+          onConnectedRef.current
+        ) {
+          hasFiredConnectedRef.current = true;
+          try {
+            onConnectedRef.current(remoteStreamRef.current);
+          } catch (err) {
+            console.error('[WebRTC] Error in onConnected (state change):', err);
+          }
+        }
+      } else if (
+        pc.connectionState === 'disconnected' ||
+        pc.connectionState === 'failed' ||
+        pc.connectionState === 'closed'
+      ) {
+        onDisconnectedRef.current?.();
+        stopStatsCollection();
       }
-    }
+    };
 
-    return stream;
-  });
-};
+    pc.oniceconnectionstatechange = () => {
+      setIceConnectionState(pc.iceConnectionState);
+      console.log('[WebRTC] ICE connection state:', pc.iceConnectionState);
+      // (optional) you can log/track failures here if you want
+    };
 
+    pc.ontrack = (event) => {
+      console.log('[WebRTC] Remote track received:', event.track.kind);
 
-      // Local ICE candidates → server
-      pc.onicecandidate = (event) => {
-        if (event.candidate && socketRef.current && sessionRef.current) {
-          const {
-            sessionId,
-            sessionToken,
-            localDeviceId,
-            remoteDeviceId,
-            localUserId,
-          } = sessionRef.current;
+      setRemoteStream((prev) => {
+        // Reuse existing stream if any, otherwise make a new one
+        const stream = prev || new MediaStream();
 
-          socketRef.current.emit('webrtc-ice', {
-            sessionId,
-            fromUserId: localUserId,
-            fromDeviceId: localDeviceId,
-            toDeviceId: remoteDeviceId,
-            candidate: event.candidate,
-            token: sessionToken,
-          });
+        // Avoid adding the same track twice
+        const alreadyThere = stream.getTracks().some(
+          (t) => t.id === event.track.id
+        );
+        if (!alreadyThere) {
+          stream.addTrack(event.track);
+        }
+
+        remoteStreamRef.current = stream;
+
+        // Fire onConnected callback ONCE when the first track arrives
+        if (!hasFiredConnectedRef.current && onConnectedRef.current) {
+          hasFiredConnectedRef.current = true;
+          try {
+            onConnectedRef.current(stream);
+          } catch (err) {
+            console.error('[WebRTC] Error in onConnected callback:', err);
+          }
+        }
+
+        return stream;
+      });
+    };
+
+    // Local ICE candidates → server
+    pc.onicecandidate = (event) => {
+      if (event.candidate && socketRef.current && sessionRef.current) {
+        const {
+          sessionId,
+          sessionToken,
+          localDeviceId,
+          remoteDeviceId,
+          localUserId,
+        } = sessionRef.current;
+
+        socketRef.current.emit('webrtc-ice', {
+          sessionId,
+          fromUserId: localUserId,
+          fromDeviceId: localDeviceId,
+          toDeviceId: remoteDeviceId,
+          candidate: event.candidate,
+          token: sessionToken,
+        });
+      }
+    };
+
+    // DataChannel (caller only)
+    if (sessionRef.current?.role === 'caller') {
+      console.log('[DataChannel] Creating channel as Caller');
+      const dc = pc.createDataChannel('desklink-control', {
+        ordered: true,
+        maxRetransmits: 3,
+      });
+
+      dc.onopen = () => {
+        console.log('[DataChannel] Opened');
+      };
+
+      dc.onclose = () => {
+        console.log('[DataChannel] Closed');
+      };
+
+      dc.onmessage = (event) => {
+        try {
+          const message =
+            typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+          onDataMessageRef.current?.(message);
+        } catch (err) {
+          console.error('[DataChannel] Parse error:', err);
         }
       };
 
-      // DataChannel:
-      //  - Caller creates it
-      //  - Receiver only listens in ondatachannel
-      if (sessionRef.current?.role === 'caller') {
-        console.log('[DataChannel] Creating channel as Caller');
-        const dc = pc.createDataChannel('desklink-control', {
-          ordered: true,
-          maxRetransmits: 3,
-        });
+      dataChannelRef.current = dc;
+    }
 
-        dc.onopen = () => {
-          console.log('[DataChannel] Opened');
-        };
+    pc.ondatachannel = (event) => {
+      console.log('[DataChannel] Received datachannel (Receiver)');
+      const dc = event.channel;
+      dataChannelRef.current = dc;
 
-        dc.onclose = () => {
-          console.log('[DataChannel] Closed');
-        };
-
-        dc.onmessage = (event) => {
-          try {
-            const message =
-              typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
-            onDataMessageRef.current?.(message);
-          } catch (err) {
-            console.error('[DataChannel] Parse error:', err);
-          }
-        };
-
-        dataChannelRef.current = dc;
-      }
-
-      pc.ondatachannel = (event) => {
-        console.log('[DataChannel] Received datachannel (Receiver)');
-        const dc = event.channel;
-        dataChannelRef.current = dc;
-
-        dc.onopen = () => {
-          console.log('[DataChannel] Opened (receiver)');
-        };
-
-        dc.onclose = () => {
-          console.log('[DataChannel] Closed (receiver)');
-        };
-
-        dc.onmessage = (event) => {
-          try {
-            const message =
-              typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
-            onDataMessageRef.current?.(message);
-          } catch (err) {
-            console.error('[DataChannel] Parse error:', err);
-          }
-        };
+      dc.onopen = () => {
+        console.log('[DataChannel] Opened (receiver)');
       };
 
-      return pc;
-    },
-    [ startStatsCollection, stopStatsCollection]
-  );
+      dc.onclose = () => {
+        console.log('[DataChannel] Closed (receiver)');
+      };
+
+      dc.onmessage = (event) => {
+        try {
+          const message =
+            typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+          onDataMessageRef.current?.(message);
+        } catch (err) {
+          console.error('[DataChannel] Parse error:', err);
+        }
+      };
+    };
+
+    return pc;
+  },
+  [startStatsCollection, stopStatsCollection]
+);
 
   /**
    * Start as caller (controller)
@@ -256,7 +270,7 @@ const pendingRemoteIceCandidatesRef = useRef([]);
       localUserId,
       localDeviceId,
       remoteDeviceId,
-      iceServers,
+      
     }) => {
       try {
         if (pcRef.current || socketRef.current) {
@@ -390,7 +404,7 @@ const pendingRemoteIceCandidatesRef = useRef([]);
       localDeviceId,
       remoteDeviceId,
       sdp,
-      iceServers,
+      
     }) => {
       try {
         if (pcRef.current || socketRef.current) {
@@ -443,7 +457,7 @@ const pendingRemoteIceCandidatesRef = useRef([]);
           }
         });
 
-        const pc = await createPeerConnection(iceServers);
+        const pc = await createPeerConnection(TURN_ICE_SERVERS);
 
         await pc.setRemoteDescription(
           new RTCSessionDescription({ type: 'offer', sdp })

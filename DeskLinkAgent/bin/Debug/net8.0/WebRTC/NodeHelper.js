@@ -20,6 +20,14 @@ const robot = require('robotjs');
 const screenshot = require('screenshot-desktop');
 const { PNG } = require('pngjs');   // for decoding PNG screenshots
 
+const TURN_ICE_SERVERS = [
+  { urls: "stun:stun.l.google.com:19302" },
+  {
+    urls: "turn:avn.openai-coturn.workers.dev:443?transport=tcp",
+    username: "avneesh",
+    credential: "walkoli123",
+  },
+];
 
 // Configuration from command line args
 const args = process.argv.slice(2);
@@ -325,23 +333,11 @@ function stopScreenCapture() {
 /**
  * Fetch TURN/STUN servers
  */
-async function getIceServers(serverUrl, sessionToken) {
-  try {
-    const res = await fetch(`${serverUrl}/api/remote/turn-token`, {
-      headers: { Authorization: `Bearer ${sessionToken}` },
-      timeout: 5000,
-    });
-    if (!res.ok) {
-      console.error('[TURN] turn-token fetch failed', res.status);
-      return [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }];
-    }
-    const body = await res.json();
-    return body.iceServers || [{ urls: 'stun:stun.l.google.com:19302' }];
-  } catch (err) {
-    console.error('[TURN] fetch error', err);
-    return [{ urls: 'stun:stun.l.google.com:19302' }];
-  }
+async function getIceServers() {
+  // For now we always use the hardcoded TURN servers.
+  return TURN_ICE_SERVERS;
 }
+
 
 /**
  * Initialize Socket.IO connection
@@ -366,53 +362,53 @@ function initSocket() {
   });
 
   socket.on('connect', async () => {
-    console.error('[Socket] Connected - id=', socket.id);
-    
-    // 1. Register device
-    socket.emit('register', { deviceId: config.deviceId });
-    socket.emit('register-complete', { deviceId: config.deviceId });
-    console.error('[Socket] register emitted for', config.deviceId);
+  console.error('[Socket] Connected - id=', socket.id);
 
-    // 2. Fetch ICE Servers (TURN)
-    // FIX 2: Caller now waits for this too
-    const iceServers = await getIceServers(config.serverUrl, config.agentJwt || config.token);
-    console.error('[Socket] obtained iceServers', JSON.stringify(iceServers));
-    
-    // FIX 1: Only init peer connection here, once.
-    if (!peerConnection) {
-      initPeerConnection(iceServers);
+  // 1. Register device
+  socket.emit('register', { deviceId: config.deviceId });
+  socket.emit('register-complete', { deviceId: config.deviceId });
+  console.error('[Socket] register emitted for', config.deviceId);
+
+  // 2. Get ICE servers (hardcoded TURN/STUN)
+  const iceServers = await getIceServers();
+  console.error('[Socket] obtained iceServers', JSON.stringify(iceServers));
+
+  // 3. Init PeerConnection ONCE using those servers
+  if (!peerConnection) {
+    initPeerConnection(iceServers);
+  }
+
+  // 4. If this helper ever runs as caller (future), create offer here
+  if (config.role === 'caller') {
+    try {
+      console.error('[NodeHelper] Creating DataChannel and Offer as Caller');
+
+      dataChannel = peerConnection.createDataChannel('desklink-control', {
+        ordered: true,
+        maxRetransmits: 3,
+      });
+      setupDataChannel();
+
+      const offer = await peerConnection.createOffer({
+        offerToReceiveVideo: true,
+        offerToReceiveAudio: false,
+      });
+      await peerConnection.setLocalDescription(offer);
+
+      socket.emit('webrtc-offer', {
+        sessionId: config.sessionId,
+        fromUserId: config.userId,
+        fromDeviceId: config.deviceId,
+        toDeviceId: config.remoteDeviceId,
+        sdp: offer.sdp,
+        token: config.token,
+      });
+    } catch (err) {
+      console.error('[Caller] Error creating offer:', err);
     }
+  }
+});
 
-    // FIX 2: If we are the Caller, create the offer NOW (after we have the correct ICE servers)
-    if (config.role === 'caller') {
-      try {
-        console.error('[NodeHelper] Creating DataChannel and Offer as Caller');
-        
-        dataChannel = peerConnection.createDataChannel('desklink-control', {
-          ordered: true,
-          maxRetransmits: 3,
-        });
-        setupDataChannel();
-
-        const offer = await peerConnection.createOffer({
-          offerToReceiveVideo: true,
-          offerToReceiveAudio: false,
-        });
-        await peerConnection.setLocalDescription(offer);
-
-        socket.emit('webrtc-offer', {
-          sessionId: config.sessionId,
-          fromUserId: config.userId,
-          fromDeviceId: config.deviceId,
-          toDeviceId: config.remoteDeviceId,
-          sdp: offer.sdp,
-          token: config.token,
-        });
-      } catch (err) {
-         console.error('[Caller] Error creating offer:', err);
-      }
-    }
-  });
 
   socket.on('connect_error', (err) => {
     console.error('[Socket] connect_error', err && (err.message || err));
@@ -428,7 +424,7 @@ socket.on('webrtc-offer', async ({ sdp, sessionId, fromUserId, fromDeviceId, toD
     // 🛡️ Guard: create a peerConnection if it does not exist yet
     if (!peerConnection) {
       console.error('[WebRTC] peerConnection is null in offer handler, creating with default ICE servers');
-      initPeerConnection(); // uses the default STUN config
+      initPeerConnection(TURN_ICE_SERVERS); // uses the default STUN config
     }
 
     await peerConnection.setRemoteDescription(

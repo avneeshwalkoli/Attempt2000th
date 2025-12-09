@@ -362,53 +362,53 @@ function initSocket() {
   });
 
   socket.on('connect', async () => {
-    console.error('[Socket] Connected - id=', socket.id);
-    
-    // 1. Register device
-    socket.emit('register', { deviceId: config.deviceId });
-    socket.emit('register-complete', { deviceId: config.deviceId });
-    console.error('[Socket] register emitted for', config.deviceId);
+  console.error('[Socket] Connected - id=', socket.id);
 
-    // 2. Fetch ICE Servers (TURN)
-    // FIX 2: Caller now waits for this too
-   
-    console.error('[Socket] obtained iceServers', JSON.stringify(iceServers));
-    
-    // FIX 1: Only init peer connection here, once.
-    if (!peerConnection) {
-      initPeerConnection(iceServers);
+  // 1. Register device
+  socket.emit('register', { deviceId: config.deviceId });
+  socket.emit('register-complete', { deviceId: config.deviceId });
+  console.error('[Socket] register emitted for', config.deviceId);
+
+  // 2. Get ICE servers (hardcoded TURN/STUN)
+  const iceServers = await getIceServers();
+  console.error('[Socket] obtained iceServers', JSON.stringify(iceServers));
+
+  // 3. Init PeerConnection ONCE using those servers
+  if (!peerConnection) {
+    initPeerConnection(iceServers);
+  }
+
+  // 4. If this helper ever runs as caller (future), create offer here
+  if (config.role === 'caller') {
+    try {
+      console.error('[NodeHelper] Creating DataChannel and Offer as Caller');
+
+      dataChannel = peerConnection.createDataChannel('desklink-control', {
+        ordered: true,
+        maxRetransmits: 3,
+      });
+      setupDataChannel();
+
+      const offer = await peerConnection.createOffer({
+        offerToReceiveVideo: true,
+        offerToReceiveAudio: false,
+      });
+      await peerConnection.setLocalDescription(offer);
+
+      socket.emit('webrtc-offer', {
+        sessionId: config.sessionId,
+        fromUserId: config.userId,
+        fromDeviceId: config.deviceId,
+        toDeviceId: config.remoteDeviceId,
+        sdp: offer.sdp,
+        token: config.token,
+      });
+    } catch (err) {
+      console.error('[Caller] Error creating offer:', err);
     }
+  }
+});
 
-    // FIX 2: If we are the Caller, create the offer NOW (after we have the correct ICE servers)
-    if (config.role === 'caller') {
-      try {
-        console.error('[NodeHelper] Creating DataChannel and Offer as Caller');
-        
-        dataChannel = peerConnection.createDataChannel('desklink-control', {
-          ordered: true,
-          maxRetransmits: 3,
-        });
-        setupDataChannel();
-
-        const offer = await peerConnection.createOffer({
-          offerToReceiveVideo: true,
-          offerToReceiveAudio: false,
-        });
-        await peerConnection.setLocalDescription(offer);
-
-        socket.emit('webrtc-offer', {
-          sessionId: config.sessionId,
-          fromUserId: config.userId,
-          fromDeviceId: config.deviceId,
-          toDeviceId: config.remoteDeviceId,
-          sdp: offer.sdp,
-          token: config.token,
-        });
-      } catch (err) {
-         console.error('[Caller] Error creating offer:', err);
-      }
-    }
-  });
 
   socket.on('connect_error', (err) => {
     console.error('[Socket] connect_error', err && (err.message || err));
