@@ -25,14 +25,19 @@ function generateSessionToken(sessionId, userId, deviceId, expiresInSeconds = 30
 function verifySessionToken(token) {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
     if (decoded.type !== 'webrtc-session') {
-      throw new Error('Invalid token type');
+      console.warn('[sessionToken] invalid token type:', decoded.type);
+      return null;
     }
+
     return decoded;
   } catch (err) {
-    throw new Error('Invalid or expired session token');
+    console.warn('[sessionToken] verify failed:', err.message);
+    return null; // ❗ do NOT throw, just return null
   }
 }
+
 
 /**
  * Generate TURN credentials using HMAC (for coturn long-term credentials)

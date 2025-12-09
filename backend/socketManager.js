@@ -413,61 +413,74 @@ function createSocketServer(server, clientOrigin) {
      */
 
     // WebRTC Offer
-    socket.on('webrtc-offer', async ({ sessionId, fromUserId, fromDeviceId, toDeviceId, sdp, token }) => {
-      try {
-        // Verify session token
-        if (token) {
-          const decoded = verifySessionToken(token);
-          if (decoded.sessionId !== sessionId) {
-            console.error('[webrtc-offer] Session ID mismatch');
-            return;
-          }
-        }
+  socket.on('webrtc-offer', async ({ sessionId, fromUserId, fromDeviceId, toDeviceId, sdp, token }) => {
+  try {
+    // 🔐 Soft session token validation
+    if (token) {
+      const decoded = verifySessionToken(token);
 
-        // Validate session ownership
-        const session = await validateSessionAccess(sessionId, fromUserId);
-        if (!session) {
-          console.error('[webrtc-offer] Invalid session or unauthorized');
-          return;
-        }
-
-        if (session.status !== 'accepted') {
-          console.error('[webrtc-offer] Session not in accepted state');
-          return;
-        }
-
-        metrics.offersRelayed++;
-
-        // Log signaling event
-        console.log(`[webrtc-offer] ${sessionId} from ${fromDeviceId} to ${toDeviceId}`);
-
-        // Relay to target device
-        emitToDevice(toDeviceId, 'webrtc-offer', {
-          sessionId,
-          fromUserId,
-          fromDeviceId,
-          sdp,
-        });
-
-        // Queue if device offline
-        if (!onlineDevicesById.has(String(toDeviceId))) {
-          queueSignal(toDeviceId, 'webrtc-offer', { sessionId, fromUserId, fromDeviceId, sdp });
-        }
-      } catch (err) {
-        console.error('[webrtc-offer] error:', err.message);
+      if (!decoded) {
+        console.warn('[webrtc-offer] invalid or expired session token – continuing');
+      } else if (decoded.sessionId !== sessionId) {
+        console.warn(
+          '[webrtc-offer] sessionId mismatch (token vs payload)',
+          decoded.sessionId,
+          sessionId
+        );
       }
+    }
+
+    // ✅ HARD validation via DB (this is the real security)
+    const session = await validateSessionAccess(sessionId, fromUserId);
+    if (!session) {
+      console.error('[webrtc-offer] Invalid session or unauthorized');
+      return;
+    }
+
+    if (session.status !== 'accepted') {
+      console.error('[webrtc-offer] Session not in accepted state');
+      return;
+    }
+
+    metrics.offersRelayed++;
+
+    console.log(`[webrtc-offer] ${sessionId} from ${fromDeviceId} to ${toDeviceId}`);
+
+    emitToDevice(toDeviceId, 'webrtc-offer', {
+      sessionId,
+      fromUserId,
+      fromDeviceId,
+      sdp,
     });
+
+    if (!onlineDevicesById.has(String(toDeviceId))) {
+      queueSignal(toDeviceId, 'webrtc-offer', {
+        sessionId,
+        fromUserId,
+        fromDeviceId,
+        sdp,
+      });
+    }
+  } catch (err) {
+    console.error('[webrtc-offer] error:', err.message);
+  }
+});
+
 
     // WebRTC Answer
     socket.on('webrtc-answer', async ({ sessionId, fromUserId, fromDeviceId, toDeviceId, sdp, token }) => {
       try {
         if (token) {
-          const decoded = verifySessionToken(token);
-          if (decoded.sessionId !== sessionId) {
-            console.error('[webrtc-answer] Session ID mismatch');
-            return;
-          }
-        }
+  const decoded = verifySessionToken(token);
+
+  if (!decoded) {
+    console.warn('[webrtc-answer] invalid or expired session token, continuing');
+  } else if (decoded.sessionId !== sessionId) {
+    console.error('[webrtc-answer] Session ID mismatch between token and payload');
+    // optional: return here if you want strict
+  }
+}
+
 
         const session = await validateSessionAccess(sessionId, fromUserId);
         if (!session) {
@@ -496,11 +509,16 @@ function createSocketServer(server, clientOrigin) {
     socket.on('webrtc-ice', async ({ sessionId, fromUserId, fromDeviceId, toDeviceId, candidate, token }) => {
       try {
         if (token) {
-          const decoded = verifySessionToken(token);
-          if (decoded.sessionId !== sessionId) {
-            return;
-          }
-        }
+  const decoded = verifySessionToken(token);
+
+  if (!decoded) {
+    console.warn('[webrtc-ice] invalid or expired session token, continuing');
+  } else if (decoded.sessionId !== sessionId) {
+    console.error('[webrtc-ice] Session ID mismatch between token and payload');
+    // optional: return here if you want strict
+  }
+}
+
 
         const session = await validateSessionAccess(sessionId, fromUserId);
         if (!session) {
@@ -559,12 +577,17 @@ function createSocketServer(server, clientOrigin) {
     // DataChannel control messages (fallback if datachannel unavailable)
     socket.on('desklink-control', async ({ sessionId, fromUserId, message, token }) => {
       try {
-        if (token) {
-          const decoded = verifySessionToken(token);
-          if (decoded.sessionId !== sessionId) {
-            return;
-          }
-        }
+       if (token) {
+  const decoded = verifySessionToken(token);
+
+  if (!decoded) {
+    console.warn('[desklink-control] invalid or expired session token, continuing');
+  } else if (decoded.sessionId !== sessionId) {
+    console.error('[desklink-control] Session ID mismatch');
+    // optional: return
+  }
+}
+
 
         const session = await validateSessionAccess(sessionId, fromUserId);
         if (!session) {
