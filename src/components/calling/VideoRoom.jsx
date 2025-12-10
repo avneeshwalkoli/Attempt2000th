@@ -3,12 +3,13 @@
  * Handles grid layout and screen share layout with sidebar
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { useRoomClient } from './useRoomClient.js';
-import ParticipantTile from './ParticipantTile.jsx';
-import ScreenShareTile from './ScreenShareTile.jsx';
-import ControlsBar from './ControlsBar.jsx';
-import { getGridCols, isScreenShareActive, getScreenShareParticipant, getRegularParticipants } from './layoutUtils.js';
+import { useMeetingParticipants } from './useMeetingParticipants.js';
+import { useScreenShare } from './useScreenShare.js';
+import MeetingGrid from './MeetingGrid.jsx';
+import ControlBar from './ControlBar.jsx';
+import ScreenShareView from './ScreenShareView.jsx';
 
 export default function VideoRoom({
   roomId,
@@ -20,7 +21,7 @@ export default function VideoRoom({
   onLeave,
 }) {
   const userId = React.useMemo(() => crypto.randomUUID(), []);
-  
+
   const {
     localStream,
     localScreenStream,
@@ -33,62 +34,48 @@ export default function VideoRoom({
     activeSpeakerId,
     meetingEnded,
     meetingEndedBy,
-    initializeLocalStream,
     toggleAudio,
     toggleVideo,
     startScreenShare,
     stopScreenShare,
     endMeeting,
     leaveRoom,
+    initializeLocalStream,
   } = useRoomClient(roomId, userId, userName, isHost, onLeave);
 
-  const [allParticipants, setAllParticipants] = useState([]);
-
-  // Initialize local stream
+  // Initialize local media based on initial audio/video flags
   useEffect(() => {
-    if (externalStream) {
-      // Use provided stream - set it directly
-      if (localStream === null) {
-        // The external stream is already set, just initialize the hook
-        initializeLocalStream({
-          audio: initialAudioEnabled,
-          video: initialVideoEnabled,
-        });
-      }
-    } else {
-      // Initialize new stream
-      initializeLocalStream({
-        audio: initialAudioEnabled,
-        video: initialVideoEnabled,
-      });
-    }
+    const constraints = {
+      audio: initialAudioEnabled,
+      video: initialVideoEnabled ? { width: 1280, height: 720 } : false,
+    };
+
+    initializeLocalStream(constraints).catch((error) => {
+      console.error('Failed to initialize local media stream:', error);
+    });
+    // We intentionally run this once on mount to mirror the original behavior
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Update all participants list
-  useEffect(() => {
-    const localParticipant = participants.find((p) => p.id === userId);
-    const remoteParticipants = participants.filter((p) => p.id !== userId);
+  const { allParticipants } = useMeetingParticipants({
+    participants,
+    localUserId: userId,
+    isScreenSharing,
+    screenShareUserId,
+  });
 
-    const updated = [];
-    
-    // Add local participant first
-    if (localParticipant) {
-      updated.push({
-        ...localParticipant,
-        isScreenSharing: isScreenSharing && screenShareUserId === userId,
-      });
-    }
-
-    // Add remote participants
-    remoteParticipants.forEach((p) => {
-      updated.push({
-        ...p,
-        isScreenSharing: isScreenSharing && screenShareUserId === p.id,
-      });
-    });
-
-    setAllParticipants(updated);
-  }, [participants, isScreenSharing, screenShareUserId, userId]);
+  const {
+    hasScreenShare,
+    activeScreenShareStream,
+    screenShareParticipant,
+  } = useScreenShare({
+    isScreenSharing,
+    screenShareUserId,
+    screenShareStream,
+    localScreenStream,
+    participants,
+    localUserId: userId,
+  });
 
   // Handle leave or end meeting
   const handleLeave = () => {
@@ -104,16 +91,6 @@ export default function VideoRoom({
       }
     }
   };
-
-  // Get screen share participant
-  const screenShareParticipant = getScreenShareParticipant(allParticipants);
-  const regularParticipants = getRegularParticipants(allParticipants);
-  const hasScreenShare = isScreenShareActive(allParticipants);
-
-  // Determine which screen share stream to use
-  const activeScreenShareStream = screenShareUserId === userId 
-    ? localScreenStream 
-    : screenShareStream;
 
   // Note: onLeave is now handled in useRoomClient's handleMeetingEnded
   // This ensures all participants see the message before redirecting
@@ -143,11 +120,11 @@ export default function VideoRoom({
               Meeting Ended
             </div>
             <div className="text-lg text-slate-300">
-              {isHost 
-                ? "You have ended the meeting for all participants."
-                : meetingEndedBy 
+              {isHost
+                ? 'You have ended the meeting for all participants.'
+                : meetingEndedBy
                   ? `${meetingEndedBy} has ended the meeting.`
-                  : "The host has ended the meeting."}
+                  : 'The host has ended the meeting.'}
             </div>
             <div className="text-sm text-slate-500 pt-4 animate-pulse">
               Redirecting to dashboard...
@@ -164,58 +141,35 @@ export default function VideoRoom({
       <div className="flex-1 overflow-hidden flex">
         {hasScreenShare && activeScreenShareStream ? (
           // Screen Share Layout: Large screen on left, participants on right
-          <>
-            {/* Screen Share - 85% width */}
-            <div className="flex-[0.85] p-4">
-              <ScreenShareTile
-                screenStream={activeScreenShareStream}
-                presenterName={screenShareParticipant?.name || 'Presenter'}
-                isLocal={screenShareUserId === userId}
-              />
-            </div>
-
-            {/* Participants Sidebar - 15% width, min 300px */}
-            <div className="flex-[0.15] min-w-[300px] border-l border-slate-800 bg-slate-900/50 overflow-y-auto p-4">
-              <div className="space-y-3">
-                {allParticipants.map((participant) => (
-                  <div key={participant.id} className="mb-3">
-                    <ParticipantTile
-                      participant={participant}
-                      isLocal={participant.id === userId}
-                      isActiveSpeaker={activeSpeakerId === participant.id}
-                      compact={true}
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-          </>
+          <ScreenShareView
+            screenStream={activeScreenShareStream}
+            presenter={screenShareParticipant}
+            participants={allParticipants}
+            localUserId={userId}
+            activeSpeakerId={activeSpeakerId}
+          />
         ) : (
           // Grid Layout: All participants in grid
-          <div className="flex-1 overflow-auto p-4 w-full">
-            <div className={`grid ${getGridCols(allParticipants.length)} gap-4 h-full`}>
-              {allParticipants.map((participant) => (
-                <ParticipantTile
-                  key={participant.id}
-                  participant={participant}
-                  isLocal={participant.id === userId}
-                  isActiveSpeaker={activeSpeakerId === participant.id}
-                  compact={false}
-                />
-              ))}
-            </div>
-          </div>
+          <MeetingGrid
+            participants={allParticipants}
+            localUserId={userId}
+            activeSpeakerId={activeSpeakerId}
+          />
         )}
       </div>
 
       {/* Controls Bar */}
-      <ControlsBar
+      <ControlBar
         isAudioEnabled={isAudioEnabled}
         isVideoEnabled={isVideoEnabled}
         isScreenSharing={isScreenSharing && screenShareUserId === userId}
         onToggleAudio={() => toggleAudio(!isAudioEnabled)}
         onToggleVideo={() => toggleVideo(!isVideoEnabled)}
-        onScreenShare={isScreenSharing && screenShareUserId === userId ? stopScreenShare : startScreenShare}
+        onScreenShare={
+          isScreenSharing && screenShareUserId === userId
+            ? stopScreenShare
+            : startScreenShare
+        }
         onLeave={handleLeave}
         participantCount={allParticipants.length}
         roomId={roomId}

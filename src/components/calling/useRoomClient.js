@@ -33,6 +33,7 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
   const remoteStreamsRef = useRef(new Map()); // Map<userId, { videoStream, audioStream }>
   const localStreamRef = useRef(null);
   const localScreenStreamRef = useRef(null);
+  const screenShareUserIdRef = useRef(null);
   const audioContextRef = useRef(null);
   const audioAnalyserRef = useRef(null);
   const isInitializedRef = useRef(false);
@@ -166,21 +167,23 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
 
         // Add track to appropriate stream
         if (track.kind === 'video') {
-          // Check if it's screen share
-          const settings = track.getSettings();
-          const isScreenShare =
+          // Detect screen share: prefer explicit screenShareUserIdRef, fall back to displaySurface when available
+          const settings = track.getSettings ? track.getSettings() : {};
+          const isScreenShareTrack =
+            screenShareUserIdRef.current === targetUserId ||
             settings.displaySurface === 'screen' ||
             settings.displaySurface === 'window' ||
             settings.displaySurface === 'browser';
 
-          if (isScreenShare) {
-            const screenStream = new MediaStream();
-            screenStream.addTrack(track);
+          if (isScreenShareTrack) {
+            // Use the full remote stream when available so screen audio is included
+            const screenStream = stream || new MediaStream([track]);
             setScreenShareStream(screenStream);
             setScreenShareUserId(targetUserId);
+            screenShareUserIdRef.current = targetUserId;
             setIsScreenSharing(true);
           } else {
-            // Regular video track
+            // Regular camera video track
             remoteStreams.videoStream.addTrack(track);
           }
         } else if (track.kind === 'audio') {
@@ -469,6 +472,8 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
         ];
       });
 
+      return;
+
       // Create peer connection for new user
       if (isInitializedRef.current && localStreamRef.current) {
         // Check if we're already creating an offer for this user
@@ -526,10 +531,61 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
         setScreenShareStream(null);
         setScreenShareUserId(null);
         setIsScreenSharing(false);
+        screenShareUserIdRef.current = null;
       }
     },
     [screenShareUserId]
   );
+
+  // Helper: renegotiate with a specific peer after tracks change
+  const renegotiateWithPeer = useCallback(
+    async (targetUserId) => {
+      const pc = peerConnectionsRef.current.get(targetUserId);
+      if (!pc) return;
+      if (meetingEndedRef.current) return;
+      if (!socketRef.current) return;
+
+      if (pc.signalingState !== 'stable') {
+        console.log(
+          `Skipping renegotiation with ${targetUserId} - signalingState=${pc.signalingState}`
+        );
+        return;
+      }
+
+      if (pendingOffersRef.current.has(targetUserId)) {
+        console.log(
+          `Renegotiation already in progress for ${targetUserId}, skipping`
+        );
+        return;
+      }
+
+      pendingOffersRef.current.add(targetUserId);
+      try {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+        socketRef.current.emit('offer', {
+          roomId,
+          to: targetUserId,
+          offer,
+        });
+      } catch (error) {
+        console.error(`Error renegotiating with ${targetUserId}:`, error);
+        pendingOffersRef.current.delete(targetUserId);
+      }
+    },
+    [roomId]
+  );
+
+  // Helper: renegotiate with all connected peers
+  const renegotiateWithAllPeers = useCallback(async () => {
+    const peerIds = Array.from(peerConnectionsRef.current.keys());
+    for (const peerId of peerIds) {
+      // Run sequentially to reduce glare risk
+      // eslint-disable-next-line no-await-in-loop
+      await renegotiateWithPeer(peerId);
+    }
+  }, [renegotiateWithPeer]);
 
   // Handle offer
   const handleOffer = useCallback(
@@ -682,6 +738,7 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
   const handleScreenShareStarted = useCallback(({ userId: sharerUserId }) => {
     setScreenShareUserId(sharerUserId);
     setIsScreenSharing(true);
+    screenShareUserIdRef.current = sharerUserId;
   }, []);
 
   // Handle screen share stopped
@@ -689,6 +746,7 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
     setScreenShareStream(null);
     setScreenShareUserId(null);
     setIsScreenSharing(false);
+    screenShareUserIdRef.current = null;
   }, []);
 
   // Handle audio mute
@@ -732,53 +790,73 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
   const toggleAudio = useCallback(
     async (enabled) => {
       setIsAudioEnabled(enabled);
+      const hasStream = !!localStreamRef.current;
+      const existingAudioTracks = hasStream
+        ? localStreamRef.current.getAudioTracks()
+        : [];
 
-      if (localStreamRef.current) {
-        localStreamRef.current.getAudioTracks().forEach((track) => {
-          track.enabled = enabled;
-        });
+      if (enabled) {
+        // Enable or create audio track
+        if (!hasStream || existingAudioTracks.length === 0) {
+          // No audio yet: acquire a new track
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+              audio: true,
+            });
+            const audioTrack = stream.getAudioTracks()[0];
 
-        // Replace audio track in all peer connections
-        peerConnectionsRef.current.forEach((pc) => {
-          const sender = pc
-            .getSenders()
-            .find((s) => s.track && s.track.kind === 'audio');
-          if (sender && localStreamRef.current) {
-            const audioTrack = localStreamRef.current.getAudioTracks()[0];
             if (audioTrack) {
-              sender.replaceTrack(enabled ? audioTrack : null);
+              if (localStreamRef.current) {
+                localStreamRef.current.addTrack(audioTrack);
+              } else {
+                localStreamRef.current = stream;
+                setLocalStream(stream);
+              }
+
+              // Attach audio track to all peer connections
+              peerConnectionsRef.current.forEach((pc) => {
+                const sender = pc
+                  .getSenders()
+                  .find((s) => s.track && s.track.kind === 'audio');
+                if (sender) {
+                  sender.replaceTrack(audioTrack);
+                } else {
+                  pc.addTrack(audioTrack, localStreamRef.current);
+                }
+              });
+
+              await renegotiateWithAllPeers();
             }
+          } catch (error) {
+            console.error('Error getting audio track:', error);
           }
-        });
-      } else if (enabled) {
-        // Get new audio track
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            audio: true,
+        } else {
+          // Re-enable existing tracks and ensure they are attached
+          existingAudioTracks.forEach((track) => {
+            track.enabled = true;
           });
-          const audioTrack = stream.getAudioTracks()[0];
 
-          if (localStreamRef.current) {
-            localStreamRef.current.addTrack(audioTrack);
-          } else {
-            localStreamRef.current = stream;
-            setLocalStream(stream);
-          }
-
-          // Add/replace audio track in all peer connections
+          const audioTrack = existingAudioTracks[0];
           peerConnectionsRef.current.forEach((pc) => {
             const sender = pc
               .getSenders()
               .find((s) => s.track && s.track.kind === 'audio');
             if (sender) {
               sender.replaceTrack(audioTrack);
-            } else {
+            } else if (audioTrack && localStreamRef.current) {
               pc.addTrack(audioTrack, localStreamRef.current);
             }
           });
-        } catch (error) {
-          console.error('Error getting audio track:', error);
+
+          await renegotiateWithAllPeers();
         }
+      } else if (hasStream) {
+        // Disable existing audio tracks without detaching senders
+        existingAudioTracks.forEach((track) => {
+          track.enabled = false;
+        });
+
+        await renegotiateWithAllPeers();
       }
 
       // Update participant state
@@ -803,53 +881,76 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
   const toggleVideo = useCallback(
     async (enabled) => {
       setIsVideoEnabled(enabled);
+      const hasStream = !!localStreamRef.current;
+      const existingVideoTracks = hasStream
+        ? localStreamRef.current.getVideoTracks()
+        : [];
 
-      if (localStreamRef.current) {
-        localStreamRef.current.getVideoTracks().forEach((track) => {
-          track.enabled = enabled;
-        });
+      if (enabled) {
+        // Enable or create camera video track
+        if (!hasStream || existingVideoTracks.length === 0) {
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+              video: { width: 1280, height: 720 },
+            });
+            const videoTrack = stream.getVideoTracks()[0];
 
-        // Replace video track in all peer connections
-        peerConnectionsRef.current.forEach((pc) => {
-          const sender = pc
-            .getSenders()
-            .find((s) => s.track && s.track.kind === 'video' && !s.track.getSettings().displaySurface);
-          if (sender && localStreamRef.current) {
-            const videoTrack = localStreamRef.current.getVideoTracks()[0];
             if (videoTrack) {
-              sender.replaceTrack(enabled ? videoTrack : null);
+              if (localStreamRef.current) {
+                localStreamRef.current.addTrack(videoTrack);
+              } else {
+                localStreamRef.current = stream;
+                setLocalStream(stream);
+              }
+
+              // Attach camera video track in all peer connections
+              peerConnectionsRef.current.forEach((pc) => {
+                const sender = pc
+                  .getSenders()
+                  .find((s) =>
+                    s.track &&
+                    s.track.kind === 'video' &&
+                    !s.track.getSettings().displaySurface
+                  );
+                if (sender) {
+                  sender.replaceTrack(videoTrack);
+                } else if (videoTrack && localStreamRef.current) {
+                  pc.addTrack(videoTrack, localStreamRef.current);
+                }
+              });
+
+              await renegotiateWithAllPeers();
             }
+          } catch (error) {
+            console.error('Error getting video track:', error);
           }
-        });
-      } else if (enabled) {
-        // Get new video track
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            video: { width: 1280, height: 720 },
+        } else {
+          // Re-enable existing camera video tracks and ensure they are attached
+          existingVideoTracks.forEach((track) => {
+            track.enabled = true;
           });
-          const videoTrack = stream.getVideoTracks()[0];
 
-          if (localStreamRef.current) {
-            localStreamRef.current.addTrack(videoTrack);
-          } else {
-            localStreamRef.current = stream;
-            setLocalStream(stream);
-          }
-
-          // Add/replace video track in all peer connections
+          const videoTrack = existingVideoTracks[0];
           peerConnectionsRef.current.forEach((pc) => {
             const sender = pc
               .getSenders()
-              .find((s) => s.track && s.track.kind === 'video' && !s.track.getSettings().displaySurface);
+              .find((s) =>
+                s.track &&
+                s.track.kind === 'video' &&
+                !s.track.getSettings().displaySurface
+              );
             if (sender) {
               sender.replaceTrack(videoTrack);
-            } else {
+            } else if (videoTrack && localStreamRef.current) {
               pc.addTrack(videoTrack, localStreamRef.current);
             }
           });
-        } catch (error) {
-          console.error('Error getting video track:', error);
         }
+      } else if (hasStream) {
+        // Disable existing camera video tracks without detaching senders
+        existingVideoTracks.forEach((track) => {
+          track.enabled = false;
+        });
       }
 
       // Update participant state
@@ -889,19 +990,22 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
       setLocalScreenStream(stream);
       setIsScreenSharing(true);
       setScreenShareUserId(userId);
+      screenShareUserIdRef.current = userId;
 
-      // Add screen share track to all peer connections
-      peerConnectionsRef.current.forEach((pc) => {
-        pc.addTrack(videoTrack, stream);
-      });
-
-      // Broadcast screen share started
+      // Broadcast screen share started before tracks so receivers can classify correctly
       if (socketRef.current) {
         socketRef.current.emit('screen-share-started', {
           roomId,
           userId,
         });
       }
+
+      // Add screen share track to all peer connections
+      peerConnectionsRef.current.forEach((pc) => {
+        pc.addTrack(videoTrack, stream);
+      });
+
+      await renegotiateWithAllPeers();
 
       // Handle screen share end
       videoTrack.onended = () => {
@@ -938,9 +1042,12 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
       });
     });
 
+    await renegotiateWithAllPeers();
+
     setIsScreenSharing(false);
     setScreenShareUserId(null);
     setScreenShareStream(null);
+    screenShareUserIdRef.current = null;
 
     // Broadcast screen share stopped
     if (socketRef.current) {
@@ -988,9 +1095,24 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
       return;
     }
 
-    // Initialize socket connection with auto-reconnect disabled if meeting ended
+    // Resolve auth token from localStorage (same pattern as DeskLink/chat sockets)
+    let authToken = null;
+    if (typeof window !== 'undefined') {
+      authToken =
+        window.localStorage.getItem('token') ||
+        window.localStorage.getItem('vd_auth_token');
+    }
+
+    if (!authToken) {
+      console.warn('[useRoomClient] no auth token found; meeting socket will not connect');
+      return;
+    }
+
+    // Initialize socket connection with JWT auth
     socketRef.current = io(import.meta.env.VITE_SOCKET_URL || 'https://anydesk.onrender.com', {
+      auth: { token: authToken },
       transports: ['websocket'],
+      path: '/socket.io',
       reconnection: !meetingEndedRef.current,
       reconnectionDelay: 1000,
       reconnectionAttempts: 5,

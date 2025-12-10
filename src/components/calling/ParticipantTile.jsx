@@ -18,7 +18,7 @@ export default function ParticipantTile({
 
   // Update video element
   useEffect(() => {
-    if (videoRef.current && participant.videoStream) {
+    if (videoRef.current && participant.videoStream && participant.isVideoEnabled) {
       const video = videoRef.current;
       // Pause before changing srcObject to avoid AbortError
       video.pause();
@@ -34,10 +34,11 @@ export default function ParticipantTile({
         });
       }
     } else if (videoRef.current) {
+      // When video is disabled or stream is missing, clear the element
       videoRef.current.pause();
       videoRef.current.srcObject = null;
     }
-  }, [participant.videoStream]);
+  }, [participant.videoStream, participant.isVideoEnabled]);
 
   // Update audio element - FIXED: Proper audio playback for remote participants
   useEffect(() => {
