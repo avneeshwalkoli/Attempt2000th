@@ -10,6 +10,7 @@ import { useScreenShare } from './useScreenShare.js';
 import MeetingGrid from './MeetingGrid.jsx';
 import ControlBar from './ControlBar.jsx';
 import ScreenShareView from './ScreenShareView.jsx';
+import MeetingChatPanel from './MeetingChatPanel.jsx';
 
 export default function VideoRoom({
   roomId,
@@ -21,6 +22,7 @@ export default function VideoRoom({
   onLeave,
 }) {
   const userId = React.useMemo(() => crypto.randomUUID(), []);
+  const [isChatOpen, setIsChatOpen] = React.useState(false);
 
   const {
     localStream,
@@ -34,6 +36,8 @@ export default function VideoRoom({
     activeSpeakerId,
     meetingEnded,
     meetingEndedBy,
+    chatMessages,
+    sendChatMessage,
     toggleAudio,
     toggleVideo,
     startScreenShare,
@@ -139,22 +143,35 @@ export default function VideoRoom({
     <div className="flex h-screen w-screen flex-col bg-[#0F172A] text-white overflow-hidden">
       {/* Main Content Area */}
       <div className="flex-1 overflow-hidden flex">
-        {hasScreenShare && activeScreenShareStream ? (
-          // Screen Share Layout: Large screen on left, participants on right
-          <ScreenShareView
-            screenStream={activeScreenShareStream}
-            presenter={screenShareParticipant}
-            participants={allParticipants}
-            localUserId={userId}
-            activeSpeakerId={activeSpeakerId}
-          />
-        ) : (
-          // Grid Layout: All participants in grid
-          <MeetingGrid
-            participants={allParticipants}
-            localUserId={userId}
-            activeSpeakerId={activeSpeakerId}
-          />
+        <div className={isChatOpen ? 'flex-1 overflow-hidden' : 'flex-1 overflow-hidden'}>
+          {hasScreenShare && activeScreenShareStream ? (
+            // Screen Share Layout: Large screen on left, participants on right
+            <ScreenShareView
+              screenStream={activeScreenShareStream}
+              presenter={screenShareParticipant}
+              participants={allParticipants}
+              localUserId={userId}
+              activeSpeakerId={activeSpeakerId}
+            />
+          ) : (
+            // Grid Layout: All participants in grid
+            <MeetingGrid
+              participants={allParticipants}
+              localUserId={userId}
+              activeSpeakerId={activeSpeakerId}
+            />
+          )}
+        </div>
+
+        {isChatOpen && (
+          <div className="w-80 max-w-xs border-l border-slate-800 bg-slate-900/80">
+            <MeetingChatPanel
+              messages={chatMessages}
+              currentUserId={userId}
+              onSendMessage={sendChatMessage}
+              onClose={() => setIsChatOpen(false)}
+            />
+          </div>
         )}
       </div>
 
@@ -175,6 +192,7 @@ export default function VideoRoom({
         roomId={roomId}
         isHost={isHost}
         onEndMeeting={isHost ? endMeeting : undefined}
+        onToggleChat={() => setIsChatOpen((prev) => !prev)}
       />
     </div>
   );

@@ -26,6 +26,7 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
   const [activeSpeakerId, setActiveSpeakerId] = useState(null);
   const [meetingEnded, setMeetingEnded] = useState(false);
   const [meetingEndedBy, setMeetingEndedBy] = useState(null); // Store who ended the meeting
+  const [chatMessages, setChatMessages] = useState([]);
 
   // Refs
   const socketRef = useRef(null);
@@ -758,6 +759,26 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
     );
   }, []);
 
+  // Handle in-meeting chat message
+  const handleMeetingChatMessage = useCallback(
+    ({ roomId: msgRoomId, userId: senderId, userName: senderName, text, ts }) => {
+      if (!msgRoomId || msgRoomId !== roomId) return;
+      if (!text || !String(text).trim()) return;
+
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          roomId: msgRoomId,
+          userId: senderId,
+          userName: senderName || 'Participant',
+          text: String(text).trim(),
+          ts: ts || Date.now(),
+        },
+      ]);
+    },
+    [roomId]
+  );
+
   // Handle audio unmute
   const handleAudioUnmute = useCallback(({ userId: unmutedUserId }) => {
     setParticipants((prev) =>
@@ -1166,6 +1187,7 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
     socket.on('audio-unmute', handleAudioUnmute);
     socket.on('video-mute', handleVideoMute);
     socket.on('video-unmute', handleVideoUnmute);
+    socket.on('meeting-chat-message', handleMeetingChatMessage);
     socket.on('meeting-ended', handleMeetingEnded);
 
     // Cleanup on unmount
@@ -1182,6 +1204,7 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
       socket.off('audio-unmute', handleAudioUnmute);
       socket.off('video-mute', handleVideoMute);
       socket.off('video-unmute', handleVideoUnmute);
+      socket.off('meeting-chat-message', handleMeetingChatMessage);
       socket.off('meeting-ended', handleMeetingEnded);
       socket.disconnect();
     };
@@ -1202,8 +1225,27 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
     handleAudioUnmute,
     handleVideoMute,
     handleVideoUnmute,
+    handleMeetingChatMessage,
     handleMeetingEnded,
   ]);
+
+  // Send in-meeting chat message
+  const sendChatMessage = useCallback(
+    (text) => {
+      const trimmed = String(text || '').trim();
+      if (!trimmed) return;
+      if (!socketRef.current) return;
+
+      socketRef.current.emit('meeting-chat-message', {
+        roomId,
+        userId,
+        userName,
+        text: trimmed,
+        ts: Date.now(),
+      });
+    },
+    [roomId, userId, userName]
+  );
 
   return {
     localStream,
@@ -1217,6 +1259,7 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
     activeSpeakerId,
     meetingEnded,
     meetingEndedBy,
+    chatMessages,
     initializeLocalStream,
     toggleAudio,
     toggleVideo,
@@ -1224,5 +1267,6 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
     stopScreenShare,
     endMeeting,
     leaveRoom,
+    sendChatMessage,
   };
 }

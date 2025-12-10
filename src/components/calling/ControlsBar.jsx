@@ -30,6 +30,7 @@ export default function ControlsBar({
   participantCount,
   roomId,
   isHost = false,
+  onToggleChat,
 }) {
   return (
     <div className="border-t border-slate-800 bg-[#1E293B] px-6 py-4">
@@ -83,6 +84,7 @@ export default function ControlsBar({
 
           {/* Chat */}
           <button
+            onClick={onToggleChat}
             className="flex items-center justify-center w-12 h-12 rounded-full bg-slate-700 text-white hover:bg-slate-600 transition-all"
             title="Chat"
           >
