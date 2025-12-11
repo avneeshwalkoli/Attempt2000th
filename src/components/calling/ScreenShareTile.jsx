@@ -5,7 +5,7 @@
 
 import React, { useEffect, useRef } from 'react';
 
-export default function ScreenShareTile({ screenStream, presenterName, isLocal = false }) {
+export default function ScreenShareTile({ screenStream, presenterName, isLocal = false, fullWidth = false }) {
   const videoRef = useRef(null);
   const audioRef = useRef(null);
 
@@ -28,7 +28,7 @@ export default function ScreenShareTile({ screenStream, presenterName, isLocal =
   }
 
   return (
-    <div className="relative w-full h-full bg-black rounded-lg overflow-hidden">
+    <div className={`relative ${fullWidth ? 'w-full h-full' : 'w-full h-full'} bg-black rounded-lg overflow-hidden`}>
       <video
         ref={videoRef}
         autoPlay

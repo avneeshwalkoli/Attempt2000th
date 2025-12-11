@@ -38,6 +38,7 @@ export default function VideoRoom({
     meetingEndedBy,
     chatMessages,
     sendChatMessage,
+    testAddMessage, // For debugging
     toggleAudio,
     toggleVideo,
     startScreenShare,
@@ -60,6 +61,14 @@ export default function VideoRoom({
     // We intentionally run this once on mount to mirror the original behavior
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  
+  // Expose test function globally for debugging
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.testAddChatMessage = testAddMessage;
+      console.log('[VideoRoom] testAddChatMessage function available globally');
+    }
+  }, [testAddMessage]);
 
   const { allParticipants } = useMeetingParticipants({
     participants,
@@ -165,6 +174,8 @@ export default function VideoRoom({
 
         {isChatOpen && (
           <div className="w-80 max-w-xs border-l border-slate-800 bg-slate-900/80">
+            {console.log('[VideoRoom] Rendering chat panel with messages:', chatMessages, 'length:', chatMessages?.length)}
+            {console.log('[VideoRoom] sendChatMessage function:', typeof sendChatMessage)}
             <MeetingChatPanel
               messages={chatMessages}
               currentUserId={userId}
