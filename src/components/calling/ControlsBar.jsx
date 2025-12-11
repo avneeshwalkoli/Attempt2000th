@@ -30,7 +30,13 @@ export default function ControlsBar({
   participantCount,
   roomId,
   isHost = false,
+  onToggleParticipants,
   onToggleChat,
+  onToggleReactions,
+  onToggleHostTools,
+  canUseMic = true,
+  canUseCamera = true,
+  isChatDisabled = false,
 }) {
   return (
     <div className="border-t border-slate-800 bg-[#1E293B] px-6 py-4">
@@ -55,7 +61,8 @@ export default function ControlsBar({
               isAudioEnabled
                 ? 'bg-slate-700 text-white hover:bg-slate-600'
                 : 'bg-red-600 text-white hover:bg-red-500'
-            }`}
+            } ${!canUseMic && !isHost ? 'opacity-60 cursor-not-allowed' : ''}`}
+            disabled={!canUseMic && !isHost}
             title={isAudioEnabled ? 'Mute' : 'Unmute'}
           >
             {isAudioEnabled ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5" />}
@@ -68,7 +75,8 @@ export default function ControlsBar({
               isVideoEnabled
                 ? 'bg-slate-700 text-white hover:bg-slate-600'
                 : 'bg-red-600 text-white hover:bg-red-500'
-            }`}
+            } ${!canUseCamera && !isHost ? 'opacity-60 cursor-not-allowed' : ''}`}
+            disabled={!canUseCamera && !isHost}
             title={isVideoEnabled ? 'Turn off video' : 'Turn on video'}
           >
             {isVideoEnabled ? <Video className="h-5 w-5" /> : <VideoOff className="h-5 w-5" />}
@@ -76,6 +84,7 @@ export default function ControlsBar({
 
           {/* Participants */}
           <button
+            onClick={onToggleParticipants}
             className="flex items-center justify-center w-12 h-12 rounded-full bg-slate-700 text-white hover:bg-slate-600 transition-all"
             title="Participants"
           >
@@ -85,7 +94,9 @@ export default function ControlsBar({
           {/* Chat */}
           <button
             onClick={onToggleChat}
-            className="flex items-center justify-center w-12 h-12 rounded-full bg-slate-700 text-white hover:bg-slate-600 transition-all"
+            className={`flex items-center justify-center w-12 h-12 rounded-full bg-slate-700 text-white hover:bg-slate-600 transition-all ${
+              isChatDisabled && !isHost ? 'opacity-60' : ''
+            }`}
             title="Chat"
           >
             <MessageSquare className="h-5 w-5" />
@@ -93,6 +104,7 @@ export default function ControlsBar({
 
           {/* Reactions */}
           <button
+            onClick={onToggleReactions}
             className="flex items-center justify-center w-12 h-12 rounded-full bg-slate-700 text-white hover:bg-slate-600 transition-all"
             title="Reactions"
           >
@@ -115,6 +127,7 @@ export default function ControlsBar({
           {/* Host Tools (only for host) */}
           {isHost && (
             <button
+              onClick={onToggleHostTools}
               className="flex items-center justify-center w-12 h-12 rounded-full bg-slate-700 text-white hover:bg-slate-600 transition-all"
               title="Host Tools"
             >

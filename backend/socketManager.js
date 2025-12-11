@@ -95,6 +95,8 @@ function createSocketServer(server, clientOrigin) {
 
   // Store room data for meetings
   const rooms = new Map(); // Map<roomId, Map<userId, {socketId, userName, isHost}>>
+  const roomPermissions = new Map(); // Map<roomId, { micLocked, cameraLocked, chatDisabled }>
+  const roomChats = new Map(); // Map<roomId, Array<{ roomId, userId, userName, text, ts }>>
 
   // Authenticate socket connections using JWT (no shared-secret path)
   io.use(async (socket, next) => {
@@ -275,6 +277,26 @@ function createSocketServer(server, clientOrigin) {
 
       socket.emit('room-users', existingUsers);
 
+      // Send existing chat history to the new user (if any)
+      const existingChat = roomChats.get(roomId);
+      if (existingChat && existingChat.length > 0) {
+        socket.emit('meeting-chat-history', {
+          roomId,
+          messages: existingChat,
+        });
+      }
+
+      // Send current host permissions state
+      const perms = roomPermissions.get(roomId);
+      if (perms) {
+        socket.emit('host_permissions', {
+          roomId,
+          micLocked: !!perms.micLocked,
+          cameraLocked: !!perms.cameraLocked,
+          chatDisabled: !!perms.chatDisabled,
+        });
+      }
+
       // Notify others in room about new user
       socket.to(roomId).emit('user-joined', {
         userId,
@@ -361,6 +383,22 @@ function createSocketServer(server, clientOrigin) {
 
     // Audio unmute
     socket.on('audio-unmute', ({ roomId, userId }) => {
+      const roomUsers = rooms.get(roomId);
+      if (!roomUsers) return;
+
+      const caller = roomUsers.get(socket.data.userId);
+      const perms = roomPermissions.get(roomId) || {
+        micLocked: false,
+        cameraLocked: false,
+        chatDisabled: false,
+      };
+
+      // If mic is locked and caller is not host, ignore unmute
+      if (perms.micLocked && (!caller || !caller.isHost)) {
+        console.log('[audio-unmute] blocked by host mic lock in room', roomId);
+        return;
+      }
+
       socket.to(roomId).emit('audio-unmute', {
         userId,
       });
@@ -375,9 +413,277 @@ function createSocketServer(server, clientOrigin) {
 
     // Video unmute
     socket.on('video-unmute', ({ roomId, userId }) => {
+      const roomUsers = rooms.get(roomId);
+      if (!roomUsers) return;
+
+      const caller = roomUsers.get(socket.data.userId);
+      const perms = roomPermissions.get(roomId) || {
+        micLocked: false,
+        cameraLocked: false,
+        chatDisabled: false,
+      };
+
+      // If camera is locked and caller is not host, ignore unmute
+      if (perms.cameraLocked && (!caller || !caller.isHost)) {
+        console.log('[video-unmute] blocked by host camera lock in room', roomId);
+        return;
+      }
+
       socket.to(roomId).emit('video-unmute', {
         userId,
       });
+    });
+
+    // In-meeting chat message (room broadcast + history)
+    socket.on('meeting-chat-message', ({ roomId, userId, userName, text, ts }) => {
+      try {
+        if (!roomId || !text || !String(text).trim()) {
+          return;
+        }
+
+        const perms = roomPermissions.get(roomId) || {
+          micLocked: false,
+          cameraLocked: false,
+          chatDisabled: false,
+        };
+
+        const isHostSocket = !!socket.data.isHost;
+
+        // If chat is disabled and this socket is not host, ignore message
+        if (perms.chatDisabled && !isHostSocket) {
+          console.log('[meeting-chat-message] blocked by host chat lock in room', roomId);
+          return;
+        }
+
+        const senderId = userId || socket.data.userId;
+        const senderName = userName || socket.data.userName || 'Participant';
+
+        const message = {
+          roomId,
+          userId: senderId,
+          userName: senderName,
+          text: String(text).trim(),
+          ts: ts || Date.now(),
+        };
+
+        if (!roomChats.has(roomId)) {
+          roomChats.set(roomId, []);
+        }
+        const list = roomChats.get(roomId);
+        list.push(message);
+        // Optional cap to avoid unbounded growth
+        if (list.length > 200) {
+          list.splice(0, list.length - 200);
+        }
+
+        // Broadcast to everyone who joined this Socket.IO roomId
+        io.to(roomId).emit('meeting-chat-message', message);
+      } catch (err) {
+        console.error('[socket] meeting-chat-message error', err && err.message);
+      }
+    });
+
+    // Emoji reaction broadcast
+    socket.on('reaction', ({ roomId, emoji, userId, userName, ts }) => {
+      try {
+        if (!roomId || !emoji) return;
+
+        const senderId = userId || socket.data.userId;
+        const senderName = userName || socket.data.userName || 'Participant';
+
+        const payload = {
+          roomId,
+          userId: senderId,
+          userName: senderName,
+          emoji: String(emoji),
+          ts: ts || Date.now(),
+        };
+
+        // Broadcast to everyone in the room (including sender)
+        io.to(roomId).emit('reaction', payload);
+      } catch (err) {
+        console.error('[socket] reaction error', err && err.message);
+      }
+    });
+
+    // Host: toggle mic lock (participants cannot unmute)
+    socket.on('host_toggle_mic', ({ roomId, allowUnmute }) => {
+      const roomUsers = rooms.get(roomId);
+      if (!roomUsers) return;
+
+      const caller = roomUsers.get(socket.data.userId);
+      if (!caller || !caller.isHost) {
+        console.warn('[host] non-host attempted mic toggle in room', roomId);
+        return;
+      }
+
+      const perms = roomPermissions.get(roomId) || {
+        micLocked: false,
+        cameraLocked: false,
+        chatDisabled: false,
+      };
+
+      const micLocked =
+        allowUnmute != null ? !allowUnmute : !perms.micLocked;
+
+      const updated = {
+        ...perms,
+        micLocked,
+      };
+
+      roomPermissions.set(roomId, updated);
+
+      io.to(roomId).emit('host_toggle_mic', {
+        roomId,
+        micLocked,
+        allowUnmute: !micLocked,
+        changedBy: socket.data.userId,
+        changedByName: caller.userName,
+      });
+    });
+
+    // Host: toggle camera lock
+    socket.on('host_toggle_camera', ({ roomId, allowCamera }) => {
+      const roomUsers = rooms.get(roomId);
+      if (!roomUsers) return;
+
+      const caller = roomUsers.get(socket.data.userId);
+      if (!caller || !caller.isHost) {
+        console.warn('[host] non-host attempted camera toggle in room', roomId);
+        return;
+      }
+
+      const perms = roomPermissions.get(roomId) || {
+        micLocked: false,
+        cameraLocked: false,
+        chatDisabled: false,
+      };
+
+      const cameraLocked =
+        allowCamera != null ? !allowCamera : !perms.cameraLocked;
+
+      const updated = {
+        ...perms,
+        cameraLocked,
+      };
+
+      roomPermissions.set(roomId, updated);
+
+      io.to(roomId).emit('host_toggle_camera', {
+        roomId,
+        cameraLocked,
+        allowCamera: !cameraLocked,
+        changedBy: socket.data.userId,
+        changedByName: caller.userName,
+      });
+    });
+
+    // Host: disable / enable chat for participants
+    socket.on('host_disable_chat', ({ roomId, disabled }) => {
+      const roomUsers = rooms.get(roomId);
+      if (!roomUsers) return;
+
+      const caller = roomUsers.get(socket.data.userId);
+      if (!caller || !caller.isHost) {
+        console.warn('[host] non-host attempted chat toggle in room', roomId);
+        return;
+      }
+
+      const perms = roomPermissions.get(roomId) || {
+        micLocked: false,
+        cameraLocked: false,
+        chatDisabled: false,
+      };
+
+      const chatDisabled =
+        disabled != null ? !!disabled : !perms.chatDisabled;
+
+      const updated = {
+        ...perms,
+        chatDisabled,
+      };
+
+      roomPermissions.set(roomId, updated);
+
+      io.to(roomId).emit('host_disable_chat', {
+        roomId,
+        disabled: chatDisabled,
+        changedBy: socket.data.userId,
+        changedByName: caller.userName,
+      });
+    });
+
+    // Host: mute all participants (except host)
+    socket.on('host_mute_all', ({ roomId }) => {
+      const roomUsers = rooms.get(roomId);
+      if (!roomUsers) return;
+
+      const caller = roomUsers.get(socket.data.userId);
+      if (!caller || !caller.isHost) {
+        console.warn('[host] non-host attempted mute-all in room', roomId);
+        return;
+      }
+
+      const hostUserId = socket.data.userId;
+
+      roomUsers.forEach((userData, uid) => {
+        if (uid === hostUserId) return;
+
+        const targetSocket = io.sockets.sockets.get(userData.socketId);
+        if (targetSocket) {
+          // Direct notice to the participant
+          targetSocket.emit('host_mute_you', {
+            roomId,
+            hostId: hostUserId,
+            hostName: caller.userName,
+          });
+        }
+
+        // Let clients update UI for that userId
+        io.to(roomId).emit('audio-mute', {
+          userId: uid,
+        });
+      });
+    });
+
+    // Host: remove participant from meeting
+    socket.on('host_remove_user', ({ roomId, targetUserId }) => {
+      const roomUsers = rooms.get(roomId);
+      if (!roomUsers) return;
+
+      const caller = roomUsers.get(socket.data.userId);
+      if (!caller || !caller.isHost) {
+        console.warn('[host] non-host attempted remove-user in room', roomId);
+        return;
+      }
+
+      const target = roomUsers.get(targetUserId);
+      if (!target) return;
+
+      const targetSocket = io.sockets.sockets.get(target.socketId);
+      if (targetSocket) {
+        targetSocket.emit('host_remove_user', {
+          roomId,
+          userId: targetUserId,
+          removedBy: socket.data.userId,
+          removedByName: caller.userName,
+        });
+
+        targetSocket.leave(roomId);
+      }
+
+      roomUsers.delete(targetUserId);
+
+      socket.to(roomId).emit('user-left', {
+        userId: targetUserId,
+      });
+
+      if (roomUsers.size === 0) {
+        rooms.delete(roomId);
+        roomPermissions.delete(roomId);
+        roomChats.delete(roomId);
+        console.log(`Room ${roomId} deleted (empty after host remove)`);
+      }
     });
 
     // End meeting (host only)
@@ -411,203 +717,10 @@ function createSocketServer(server, clientOrigin) {
       // Delete the room after a short delay to ensure message is sent
       setTimeout(() => {
         rooms.delete(roomId);
+        roomPermissions.delete(roomId);
+        roomChats.delete(roomId);
         console.log(`Room ${roomId} deleted after meeting end`);
       }, 1000);
-    });
-
-    /**
-     * ======================
-     * WebRTC Signaling for Remote Desktop
-     * ======================
-     */
-
-    // WebRTC Offer
- socket.on('webrtc-offer', async ({ sessionId, fromUserId, fromDeviceId, toDeviceId, sdp, token }) => {
-  try {
-    let sessionUserId = fromUserId;
-
-    if (token) {
-      const decoded = verifySessionToken(token);   // 🔐
-      if (decoded.sessionId !== sessionId) {
-        console.error('[webrtc-offer] Session ID mismatch');
-        return;
-      }
-      sessionUserId = decoded.userId;             // ✅ trust token userId
-    }
-
-    const session = await validateSessionAccess(sessionId, sessionUserId);
-    if (!session) {
-      console.error('[webrtc-offer] Invalid session or unauthorized');
-      return;
-    }
-
-    if (session.status !== 'accepted') {
-      console.error('[webrtc-offer] Session not in accepted state');
-      return;
-    }
-
-    metrics.offersRelayed++;
-
-    console.log(`[webrtc-offer] ${sessionId} from ${fromDeviceId} to ${toDeviceId}`);
-
-    emitToDevice(toDeviceId, 'webrtc-offer', {
-      sessionId,
-      fromUserId,
-      fromDeviceId,
-      sdp,
-    });
-
-    if (!onlineDevicesById.has(String(toDeviceId))) {
-      queueSignal(toDeviceId, 'webrtc-offer', { sessionId, fromUserId, fromDeviceId, sdp });
-    }
-  } catch (err) {
-    console.error('[webrtc-offer] error:', err.message);
-  }
-});
-
-
-
-    // WebRTC Answer
-  socket.on('webrtc-answer', async ({ sessionId, fromUserId, fromDeviceId, toDeviceId, sdp, token }) => {
-  try {
-    let sessionUserId = fromUserId;
-
-    if (token) {
-      const decoded = verifySessionToken(token);
-      if (decoded.sessionId !== sessionId) {
-        console.error('[webrtc-answer] Session ID mismatch');
-        return;
-      }
-      sessionUserId = decoded.userId;
-    }
-
-    const session = await validateSessionAccess(sessionId, sessionUserId);
-    if (!session) {
-      console.error('[webrtc-answer] Invalid session or unauthorized');
-      return;
-    }
-
-    console.log(`[webrtc-answer] ${sessionId} from ${fromDeviceId} to ${toDeviceId}`);
-
-    emitToDevice(toDeviceId, 'webrtc-answer', {
-      sessionId,
-      fromUserId,
-      fromDeviceId,
-      sdp,
-    });
-
-    if (!onlineDevicesById.has(String(toDeviceId))) {
-      queueSignal(toDeviceId, 'webrtc-answer', { sessionId, fromUserId, fromDeviceId, sdp });
-    }
-  } catch (err) {
-    console.error('[webrtc-answer] error:', err.message);
-  }
-});
-
-
-    // WebRTC ICE Candidate
-   socket.on('webrtc-ice', async ({ sessionId, fromUserId, fromDeviceId, toDeviceId, candidate, token }) => {
-  try {
-    let sessionUserId = fromUserId;
-
-    if (token) {
-      const decoded = verifySessionToken(token);
-      if (decoded.sessionId !== sessionId) {
-        return;
-      }
-      sessionUserId = decoded.userId;
-    }
-
-    const session = await validateSessionAccess(sessionId, sessionUserId);
-    if (!session) {
-      metrics.iceFailures++;
-      return;
-    }
-
-    emitToDevice(toDeviceId, 'webrtc-ice', {
-      sessionId,
-      fromUserId,
-      fromDeviceId,
-      candidate,
-    });
-
-    if (!onlineDevicesById.has(String(toDeviceId))) {
-      queueSignal(toDeviceId, 'webrtc-ice', { sessionId, fromUserId, fromDeviceId, candidate });
-    }
-  } catch (err) {
-    console.error('[webrtc-ice] error:', err.message);
-    metrics.iceFailures++;
-  }
-});
-
-
-    // WebRTC Cancel
-    socket.on('webrtc-cancel', async ({ sessionId, fromUserId }) => {
-      try {
-        const session = await validateSessionAccess(sessionId, fromUserId);
-        if (!session) {
-          return;
-        }
-
-        console.log(`[webrtc-cancel] ${sessionId}`);
-
-        // Notify both parties
-        emitToUser(session.callerUserId, 'webrtc-cancel', { sessionId });
-        emitToUser(session.receiverUserId, 'webrtc-cancel', { sessionId });
-
-        // Update session
-        session.status = 'ended';
-        session.endedAt = new Date();
-        session.audit.push({
-          event: 'cancelled',
-          userId: fromUserId,
-          details: {},
-        });
-        await session.save();
-
-        if (metrics.activeSessions > 0) {
-          metrics.activeSessions--;
-        }
-      } catch (err) {
-        console.error('[webrtc-cancel] error:', err.message);
-      }
-    });
-
-    // DataChannel control messages (fallback if datachannel unavailable)
-    socket.on('desklink-control', async ({ sessionId, fromUserId, message, token }) => {
-      try {
-       if (token) {
-  const decoded = verifySessionToken(token);
-
-  if (!decoded) {
-    console.warn('[desklink-control] invalid or expired session token, continuing');
-  } else if (decoded.sessionId !== sessionId) {
-    console.error('[desklink-control] Session ID mismatch');
-    // optional: return
-  }
-}
-
-
-        const session = await validateSessionAccess(sessionId, fromUserId);
-        if (!session) {
-          return;
-        }
-
-        metrics.datachannelMsgs++;
-
-        // Relay to receiver device
-        const targetDeviceId = String(fromUserId) === String(session.callerUserId)
-          ? session.receiverDeviceId
-          : session.callerDeviceId;
-
-        emitToDevice(targetDeviceId, 'desklink-control', {
-          sessionId,
-          fromUserId,
-          message,
-        });
-      } catch (err) {
-        console.error('[desklink-control] error:', err.message);
-      }
     });
 
     // User left (generic disconnect)
@@ -626,6 +739,8 @@ function createSocketServer(server, clientOrigin) {
           rooms.get(roomId).delete(userId);
           if (rooms.get(roomId).size === 0) {
             rooms.delete(roomId);
+            roomPermissions.delete(roomId);
+            roomChats.delete(roomId);
             console.log(`Room ${roomId} deleted (empty)`);
           }
         }

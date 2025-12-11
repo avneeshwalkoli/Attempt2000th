@@ -5,6 +5,7 @@ export default function MeetingChatPanel({
   currentUserId,
   onSendMessage,
   onClose,
+  isChatDisabled = false,
 }) {
   const [draft, setDraft] = useState('');
   const listRef = useRef(null);
@@ -18,6 +19,7 @@ export default function MeetingChatPanel({
     e.preventDefault();
     const text = draft.trim();
     if (!text) return;
+    if (isChatDisabled) return;
     onSendMessage?.(text);
     setDraft('');
   };
@@ -79,18 +81,26 @@ export default function MeetingChatPanel({
         )}
       </div>
 
+      {isChatDisabled && (
+        <div className="px-3 py-2 text-[11px] text-amber-200 bg-amber-900/30 border-t border-amber-800/40">
+          Chat disabled by host
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} className="border-t border-slate-800 bg-slate-900/90 px-3 py-2">
         <div className="flex items-center gap-2">
           <input
             type="text"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            placeholder="Type a message to everyone..."
-            className="flex-1 rounded-md bg-slate-800 text-xs px-3 py-2 outline-none border border-slate-700 focus:border-blue-500"
+            placeholder={isChatDisabled ? 'Chat disabled by host' : 'Type a message to everyone...'}
+            disabled={isChatDisabled}
+            className="flex-1 rounded-md bg-slate-800 text-xs px-3 py-2 outline-none border border-slate-700 focus:border-blue-500 disabled:opacity-60 disabled:cursor-not-allowed"
           />
           <button
             type="submit"
-            className="px-3 py-2 rounded-md bg-blue-600 hover:bg-blue-500 text-xs font-medium"
+            disabled={isChatDisabled}
+            className="px-3 py-2 rounded-md bg-blue-600 hover:bg-blue-500 text-xs font-medium disabled:opacity-60 disabled:cursor-not-allowed"
           >
             Send
           </button>

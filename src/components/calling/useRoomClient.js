@@ -27,6 +27,11 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
   const [meetingEnded, setMeetingEnded] = useState(false);
   const [meetingEndedBy, setMeetingEndedBy] = useState(null); // Store who ended the meeting
   const [chatMessages, setChatMessages] = useState([]);
+  const [hostMicLocked, setHostMicLocked] = useState(false);
+  const [hostCameraLocked, setHostCameraLocked] = useState(false);
+  const [hostChatDisabled, setHostChatDisabled] = useState(false);
+  const [reactions, setReactions] = useState([]);
+  const [hostNotice, setHostNotice] = useState(null);
 
   // Refs
   const socketRef = useRef(null);
@@ -763,18 +768,68 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
   const handleMeetingChatMessage = useCallback(
     ({ roomId: msgRoomId, userId: senderId, userName: senderName, text, ts }) => {
       if (!msgRoomId || msgRoomId !== roomId) return;
-      if (!text || !String(text).trim()) return;
 
-      setChatMessages((prev) => [
-        ...prev,
-        {
-          roomId: msgRoomId,
-          userId: senderId,
-          userName: senderName || 'Participant',
-          text: String(text).trim(),
-          ts: ts || Date.now(),
-        },
-      ]);
+      const trimmedText = String(text || '').trim();
+      if (!trimmedText) return;
+
+      const tsValue = ts || Date.now();
+
+      setChatMessages((prev) => {
+        const exists = prev.some(
+          (m) =>
+            m.roomId === msgRoomId &&
+            m.userId === senderId &&
+            m.ts === tsValue &&
+            m.text === trimmedText
+        );
+        if (exists) return prev;
+
+        return [
+          ...prev,
+          {
+            roomId: msgRoomId,
+            userId: senderId,
+            userName: senderName || 'Participant',
+            text: trimmedText,
+            ts: tsValue,
+          },
+        ];
+      });
+    },
+    [roomId]
+  );
+
+  const handleMeetingChatHistory = useCallback(
+    ({ roomId: msgRoomId, messages }) => {
+      if (!msgRoomId || msgRoomId !== roomId) return;
+      if (!Array.isArray(messages) || messages.length === 0) return;
+
+      setChatMessages((prev) => {
+        const combined = [...prev];
+        const existingKeys = new Set(
+          combined.map((m) => `${m.userId}-${m.ts}-${m.text}`)
+        );
+
+        messages.forEach((msg) => {
+          if (!msg || !msg.text) return;
+          const key = `${msg.userId}-${msg.ts}-${msg.text}`;
+          if (existingKeys.has(key)) {
+            return;
+          }
+
+          existingKeys.add(key);
+          combined.push({
+            roomId: msgRoomId,
+            userId: msg.userId,
+            userName: msg.userName || 'Participant',
+            text: String(msg.text).trim(),
+            ts: msg.ts || Date.now(),
+          });
+        });
+
+        combined.sort((a, b) => (a.ts || 0) - (b.ts || 0));
+        return combined;
+      });
     },
     [roomId]
   );
@@ -805,6 +860,115 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
       )
     );
   }, []);
+
+  const handleHostPermissions = useCallback(
+    ({ roomId: msgRoomId, micLocked, cameraLocked, chatDisabled }) => {
+      if (!msgRoomId || msgRoomId !== roomId) return;
+      setHostMicLocked(!!micLocked);
+      setHostCameraLocked(!!cameraLocked);
+      setHostChatDisabled(!!chatDisabled);
+    },
+    [roomId]
+  );
+
+  const handleHostToggleMic = useCallback(
+    ({ roomId: msgRoomId, micLocked, allowUnmute }) => {
+      if (!msgRoomId || msgRoomId !== roomId) return;
+      const locked =
+        typeof micLocked === 'boolean'
+          ? micLocked
+          : allowUnmute != null
+          ? !allowUnmute
+          : false;
+      setHostMicLocked(locked);
+    },
+    [roomId]
+  );
+
+  const handleHostToggleCamera = useCallback(
+    ({ roomId: msgRoomId, cameraLocked, allowCamera }) => {
+      if (!msgRoomId || msgRoomId !== roomId) return;
+      const locked =
+        typeof cameraLocked === 'boolean'
+          ? cameraLocked
+          : allowCamera != null
+          ? !allowCamera
+          : false;
+      setHostCameraLocked(locked);
+    },
+    [roomId]
+  );
+
+  const handleHostDisableChat = useCallback(
+    ({ roomId: msgRoomId, disabled }) => {
+      if (!msgRoomId || msgRoomId !== roomId) return;
+      setHostChatDisabled(!!disabled);
+    },
+    [roomId]
+  );
+
+  const handleHostMuteYou = useCallback(
+    ({ roomId: msgRoomId, hostId, hostName }) => {
+      if (!msgRoomId || msgRoomId !== roomId) return;
+      if (isHost) return;
+
+      if (localStreamRef.current) {
+        localStreamRef.current.getAudioTracks().forEach((track) => {
+          track.enabled = false;
+        });
+      }
+
+      setIsAudioEnabled(false);
+      setParticipants((prev) =>
+        prev.map((p) =>
+          p.id === userId ? { ...p, isAudioEnabled: false } : p
+        )
+      );
+
+      setHostNotice('Host muted you');
+      setTimeout(() => {
+        setHostNotice(null);
+      }, 3000);
+    },
+    [roomId, userId, isHost]
+  );
+
+  const handleHostRemoveUser = useCallback(
+    ({ roomId: msgRoomId, userId: removedUserId, removedBy, removedByName }) => {
+      if (!msgRoomId || msgRoomId !== roomId) return;
+      if (removedUserId !== userId) return;
+
+      leaveRoom();
+      if (onLeave) {
+        onLeave();
+      }
+    },
+    [roomId, userId, leaveRoom, onLeave]
+  );
+
+  const handleReaction = useCallback(
+    ({ roomId: msgRoomId, userId: senderId, userName: senderName, emoji, ts }) => {
+      if (!msgRoomId || msgRoomId !== roomId) return;
+      if (!emoji) return;
+
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const reaction = {
+        id,
+        roomId: msgRoomId,
+        userId: senderId,
+        userName: senderName || 'Participant',
+        emoji: String(emoji),
+        ts: ts || Date.now(),
+      };
+
+      setReactions((prev) => [...prev, reaction]);
+
+      setTimeout(() => {
+        setReactions((prev) => prev.filter((r) => r.id !== id));
+      }, 2500);
+    },
+    [roomId]
+  );
 
 
   // Toggle audio
@@ -1188,6 +1352,14 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
     socket.on('video-mute', handleVideoMute);
     socket.on('video-unmute', handleVideoUnmute);
     socket.on('meeting-chat-message', handleMeetingChatMessage);
+    socket.on('meeting-chat-history', handleMeetingChatHistory);
+    socket.on('host_permissions', handleHostPermissions);
+    socket.on('host_toggle_mic', handleHostToggleMic);
+    socket.on('host_toggle_camera', handleHostToggleCamera);
+    socket.on('host_disable_chat', handleHostDisableChat);
+    socket.on('host_mute_you', handleHostMuteYou);
+    socket.on('host_remove_user', handleHostRemoveUser);
+    socket.on('reaction', handleReaction);
     socket.on('meeting-ended', handleMeetingEnded);
 
     // Cleanup on unmount
@@ -1205,6 +1377,14 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
       socket.off('video-mute', handleVideoMute);
       socket.off('video-unmute', handleVideoUnmute);
       socket.off('meeting-chat-message', handleMeetingChatMessage);
+      socket.off('meeting-chat-history', handleMeetingChatHistory);
+      socket.off('host_permissions', handleHostPermissions);
+      socket.off('host_toggle_mic', handleHostToggleMic);
+      socket.off('host_toggle_camera', handleHostToggleCamera);
+      socket.off('host_disable_chat', handleHostDisableChat);
+      socket.off('host_mute_you', handleHostMuteYou);
+      socket.off('host_remove_user', handleHostRemoveUser);
+      socket.off('reaction', handleReaction);
       socket.off('meeting-ended', handleMeetingEnded);
       socket.disconnect();
     };
@@ -1226,14 +1406,34 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
     handleVideoMute,
     handleVideoUnmute,
     handleMeetingChatMessage,
+    handleMeetingChatHistory,
+    handleHostPermissions,
+    handleHostToggleMic,
+    handleHostToggleCamera,
+    handleHostDisableChat,
+    handleHostMuteYou,
+    handleHostRemoveUser,
+    handleReaction,
     handleMeetingEnded,
   ]);
 
-  // Send in-meeting chat message
+  // Send in-meeting chat message (use same handler as incoming messages)
   const sendChatMessage = useCallback(
     (text) => {
       const trimmed = String(text || '').trim();
       if (!trimmed) return;
+
+      const ts = Date.now();
+
+      // Locally add the message using the same pipeline as remote messages
+      handleMeetingChatMessage({
+        roomId,
+        userId,
+        userName,
+        text: trimmed,
+        ts,
+      });
+
       if (!socketRef.current) return;
 
       socketRef.current.emit('meeting-chat-message', {
@@ -1241,8 +1441,110 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
         userId,
         userName,
         text: trimmed,
-        ts: Date.now(),
+        ts,
       });
+    },
+    [roomId, userId, userName, handleMeetingChatMessage]
+  );
+
+  const muteAllParticipants = useCallback(() => {
+    if (!isHost) {
+      console.warn('Only host can mute all participants');
+      return;
+    }
+    if (!socketRef.current) return;
+
+    socketRef.current.emit('host_mute_all', {
+      roomId,
+      userId,
+    });
+  }, [roomId, userId, isHost]);
+
+  const setMicLock = useCallback(
+    (locked) => {
+      if (!isHost) {
+        console.warn('Only host can toggle mic lock');
+        return;
+      }
+      setHostMicLocked(!!locked);
+      if (!socketRef.current) return;
+
+      socketRef.current.emit('host_toggle_mic', {
+        roomId,
+        allowUnmute: !locked,
+      });
+    },
+    [roomId, isHost]
+  );
+
+  const setCameraLock = useCallback(
+    (locked) => {
+      if (!isHost) {
+        console.warn('Only host can toggle camera lock');
+        return;
+      }
+      setHostCameraLocked(!!locked);
+      if (!socketRef.current) return;
+
+      socketRef.current.emit('host_toggle_camera', {
+        roomId,
+        allowCamera: !locked,
+      });
+    },
+    [roomId, isHost]
+  );
+
+  const setChatDisabled = useCallback(
+    (disabled) => {
+      if (!isHost) {
+        console.warn('Only host can toggle chat');
+        return;
+      }
+      setHostChatDisabled(!!disabled);
+      if (!socketRef.current) return;
+
+      socketRef.current.emit('host_disable_chat', {
+        roomId,
+        disabled: !!disabled,
+      });
+    },
+    [roomId, isHost]
+  );
+
+  const removeParticipant = useCallback(
+    (targetUserId) => {
+      if (!isHost) {
+        console.warn('Only host can remove participants');
+        return;
+      }
+      if (!targetUserId || targetUserId === userId) return;
+      if (!socketRef.current) return;
+
+      socketRef.current.emit('host_remove_user', {
+        roomId,
+        targetUserId,
+      });
+    },
+    [roomId, userId, isHost]
+  );
+
+  const sendReaction = useCallback(
+    (emoji) => {
+      const trimmed = String(emoji || '').trim();
+      if (!trimmed) return;
+      if (!socketRef.current) return;
+
+      const payload = {
+        roomId,
+        userId,
+        userName,
+        emoji: trimmed,
+        ts: Date.now(),
+      };
+
+      // Let the server broadcast the reaction so all participants (including sender)
+      // receive the same event via the 'reaction' listener
+      socketRef.current.emit('reaction', payload);
     },
     [roomId, userId, userName]
   );
@@ -1260,6 +1562,11 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
     meetingEnded,
     meetingEndedBy,
     chatMessages,
+    hostMicLocked,
+    hostCameraLocked,
+    hostChatDisabled,
+    reactions,
+    hostNotice,
     initializeLocalStream,
     toggleAudio,
     toggleVideo,
@@ -1268,5 +1575,11 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
     endMeeting,
     leaveRoom,
     sendChatMessage,
+    muteAllParticipants,
+    setMicLock,
+    setCameraLock,
+    setChatDisabled,
+    removeParticipant,
+    sendReaction,
   };
 }
