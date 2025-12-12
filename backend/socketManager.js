@@ -2,6 +2,7 @@
  * Socket.IO Server
  * - WebRTC signaling for Meet
  * - Realtime private messaging for ChatSpace
+ * - Remote Desktop Signaling (Added)
  */
 
 const { Server } = require('socket.io');
@@ -98,7 +99,7 @@ function createSocketServer(server, clientOrigin) {
   const roomPermissions = new Map(); // Map<roomId, { micLocked, cameraLocked, chatDisabled }>
   const roomChats = new Map(); // Map<roomId, Array<{ roomId, userId, userName, text, ts }>>
 
-  // Authenticate socket connections using JWT (no shared-secret path)
+  // Authenticate socket connections using JWT
   io.use(async (socket, next) => {
     try {
       const auth = socket.handshake.auth || {};
@@ -131,8 +132,7 @@ function createSocketServer(server, clientOrigin) {
     trackUserSocket(onlineUsersByPhone, socket.userPhone, socket.id);
     trackUserSocket(onlineUsersById, socket.userId, socket.id);
 
-    // DeskLink registration: clients/devices register their deviceId
-    // and we persist the device in MongoDB owned by socket.userId.
+    // DeskLink registration
     socket.on('register', async ({ deviceId, platform, label, osInfo, deviceName }) => {
       try {
         if (!deviceId) return;
@@ -153,26 +153,25 @@ function createSocketServer(server, clientOrigin) {
         }
 
         await Device.updateOne(
-  { deviceId: devId },
-  {
-    $setOnInsert: {
-      deviceId: devId,
-      registeredAt: now,
-    },
-    $set: {
-      userId: userId, // 🔥 always set/overwrite
-      deviceName: deviceName || label || 'Agent Device',
-      osInfo: osInfo || platform || 'Unknown',
-      platform: platform || '',
-      deleted: false,
-      blocked: false,
-      label: label || 'Agent Device',
-      lastOnline: now,
-    },
-  },
-  { upsert: true }
-);
-
+          { deviceId: devId },
+          {
+            $setOnInsert: {
+              deviceId: devId,
+              registeredAt: now,
+            },
+            $set: {
+              userId: userId,
+              deviceName: deviceName || label || 'Agent Device',
+              osInfo: osInfo || platform || 'Unknown',
+              platform: platform || '',
+              deleted: false,
+              blocked: false,
+              label: label || 'Agent Device',
+              lastOnline: now,
+            },
+          },
+          { upsert: true }
+        );
 
         console.log('[device] registered/updated', devId, 'for user', userId || '(none)');
 
@@ -193,18 +192,7 @@ function createSocketServer(server, clientOrigin) {
       }
     });
 
-    //
-
-    /**
-     * ======================
-     * Realtime Chat Messaging
-     * ======================
-     *
-     * Frontend emits: 'private-message' with { to, text }
-     * - `to` is the full phone string "CC PHONE"
-     * - We persist the message in MongoDB
-     * - Then emit the saved message to both sender and receiver
-     */
+    // Chat Messaging
     socket.on('private-message', async ({ to, text }) => {
       try {
         if (!text || !String(text).trim()) {
@@ -226,10 +214,10 @@ function createSocketServer(server, clientOrigin) {
 
         const msg = msgDoc.toObject();
 
-        // Send back to sender (so it appears immediately in their chat)
+        // Send back to sender
         socket.emit('private-message', msg);
 
-        // Deliver to all connected sockets of the receiver
+        // Deliver to receiver
         const receiverSockets = onlineUsersByPhone.get(receiverPhone);
         if (receiverSockets && receiverSockets.size > 0) {
           for (const socketId of receiverSockets) {
@@ -243,6 +231,160 @@ function createSocketServer(server, clientOrigin) {
         console.error('[socket] private-message error', err);
       }
     });
+
+    /**
+     * =========================================================
+     * START: Remote Desktop Logic (WebRTC Signaling)
+     * =========================================================
+     */
+
+    // WebRTC Offer
+    socket.on('webrtc-offer', async ({ sessionId, fromUserId, fromDeviceId, toDeviceId, sdp, token }) => {
+      try {
+        // Optional: validate ephemeral session token (if provided)
+        if (token) {
+          try {
+            const decoded = verifySessionToken(token);
+            if (decoded.sessionId && decoded.sessionId !== sessionId) {
+              console.error('[webrtc-offer] session token mismatch');
+              return;
+            }
+          } catch (e) {
+            // token invalid — log but continue if you rely on JWT elsewhere
+          }
+        }
+
+        // Validate session ownership (caller/receiver)
+        const session = await validateSessionAccess(sessionId, fromUserId);
+        if (!session) {
+          console.error('[webrtc-offer] invalid session or unauthorized', sessionId, fromUserId);
+          return;
+        }
+
+        if (session.status !== 'accepted' && session.status !== 'in-progress') {
+          console.warn('[webrtc-offer] session not in accepted/in-progress state', sessionId, session.status);
+        }
+
+        metrics.offersRelayed++;
+
+        console.log(`[webrtc-offer] ${sessionId} from ${fromDeviceId} -> ${toDeviceId}`);
+
+        // Relay to target device (all sockets for that device)
+        emitToDevice(toDeviceId, 'webrtc-offer', {
+          sessionId,
+          fromUserId,
+          fromDeviceId,
+          sdp,
+        });
+
+        // If target device offline, queue signal for later delivery
+        if (!onlineDevicesById.has(String(toDeviceId))) {
+          queueSignal(toDeviceId, 'webrtc-offer', { sessionId, fromUserId, fromDeviceId, sdp });
+        }
+      } catch (err) {
+        console.error('[webrtc-offer] error:', err && err.message);
+      }
+    });
+
+    // WebRTC Answer
+    socket.on('webrtc-answer', async ({ sessionId, fromUserId, fromDeviceId, toDeviceId, sdp, token }) => {
+      try {
+        if (token) {
+          try {
+            const decoded = verifySessionToken(token);
+            if (decoded.sessionId && decoded.sessionId !== sessionId) {
+              console.error('[webrtc-answer] session token mismatch');
+              return;
+            }
+          } catch (e) {}
+        }
+
+        const session = await validateSessionAccess(sessionId, fromUserId);
+        if (!session) {
+          console.error('[webrtc-answer] invalid session or unauthorized', sessionId, fromUserId);
+          return;
+        }
+
+        console.log(`[webrtc-answer] ${sessionId} from ${fromDeviceId} -> ${toDeviceId}`);
+
+        emitToDevice(toDeviceId, 'webrtc-answer', {
+          sessionId,
+          fromUserId,
+          fromDeviceId,
+          sdp,
+        });
+
+        if (!onlineDevicesById.has(String(toDeviceId))) {
+          queueSignal(toDeviceId, 'webrtc-answer', { sessionId, fromUserId, fromDeviceId, sdp });
+        }
+      } catch (err) {
+        console.error('[webrtc-answer] error:', err && err.message);
+      }
+    });
+
+    // WebRTC ICE Candidate
+    socket.on('webrtc-ice', async ({ sessionId, fromUserId, fromDeviceId, toDeviceId, candidate, token }) => {
+      try {
+        if (token) {
+          try {
+            const decoded = verifySessionToken(token);
+            if (decoded.sessionId && decoded.sessionId !== sessionId) {
+              return;
+            }
+          } catch (e) {}
+        }
+
+        const session = await validateSessionAccess(sessionId, fromUserId);
+        if (!session) {
+          metrics.iceFailures++;
+          return;
+        }
+
+        // Relay candidate(s)
+        emitToDevice(toDeviceId, 'webrtc-ice', {
+          sessionId,
+          fromUserId,
+          fromDeviceId,
+          candidate,
+        });
+
+        if (!onlineDevicesById.has(String(toDeviceId))) {
+          queueSignal(toDeviceId, 'webrtc-ice', { sessionId, fromUserId, fromDeviceId, candidate });
+        }
+      } catch (err) {
+        console.error('[webrtc-ice] error:', err && err.message);
+        metrics.iceFailures++;
+      }
+    });
+
+    // WebRTC Cancel
+    socket.on('webrtc-cancel', async ({ sessionId, fromUserId }) => {
+      try {
+        const session = await validateSessionAccess(sessionId, fromUserId);
+        if (!session) return;
+
+        console.log(`[webrtc-cancel] ${sessionId} from ${fromUserId}`);
+
+        emitToUser(session.callerUserId, 'webrtc-cancel', { sessionId });
+        emitToUser(session.receiverUserId, 'webrtc-cancel', { sessionId });
+
+        session.status = 'ended';
+        session.endedAt = new Date();
+        session.audit.push({ event: 'cancelled', userId: fromUserId, details: {} });
+        await session.save();
+
+        if (metrics.activeSessions > 0) metrics.activeSessions--;
+      } catch (err) {
+        console.error('[webrtc-cancel] error:', err && err.message);
+      }
+    });
+
+    /**
+     * =========================================================
+     * END: Remote Desktop Logic
+     * =========================================================
+     */
+
 
     // ======================
     // WebRTC Meet Signaling
@@ -703,8 +845,7 @@ function createSocketServer(server, clientOrigin) {
       // Get host name for the message
       const hostName = user.userName || 'Host';
 
-      // Broadcast meeting ended to ALL participants in the room (including host)
-      // Using io.to(roomId) ensures everyone in the room receives the message
+      // Broadcast meeting ended to ALL participants in the room
       io.to(roomId).emit('meeting-ended', {
         roomId,
         endedBy: userId,
