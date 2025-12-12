@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("DeskLinkAgent")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+69be4d8218fd76f12cdbafa480bba22014532179")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+85b6932529406f76cd7b430926a9180b05d5957a")]
 [assembly: System.Reflection.AssemblyProductAttribute("DeskLinkAgent")]
 [assembly: System.Reflection.AssemblyTitleAttribute("DeskLinkAgent")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

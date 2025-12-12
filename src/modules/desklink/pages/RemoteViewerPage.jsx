@@ -14,7 +14,10 @@ export default function RemoteViewerPage() {
   const { user, token } = useAuth();
 
   const sessionId = searchParams.get('sessionId');
-  const remoteDeviceId = searchParams.get('remoteDeviceId');
+   const remoteDeviceId = searchParams.get('remoteDeviceId');
+   // IMPORTANT: ephemeral session token (callerToken) issued by /remote/accept
+   // must be passed to startAsCaller so server verifies webrtc signaling messages.
+   const sessionToken = searchParams.get('sessionToken');
 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [localDeviceId, setLocalDeviceId] = useState('');
@@ -52,25 +55,30 @@ export default function RemoteViewerPage() {
 
   // 2) Start WebRTC caller once we have everything
   useEffect(() => {
-    if (!sessionId || !remoteDeviceId || !localDeviceId || !user || !iceServers) return;
-
-    startAsCaller({
-      sessionId,
-      authToken: token, // user JWT for socket auth
-      localUserId: user?._id ?? user?.id,
-      localDeviceId,
-      remoteDeviceId,
-      iceServers,
-    });
-  }, [
-    sessionId,
-    remoteDeviceId,
-    localDeviceId,
-    user,
-    token,
-    iceServers,
-    startAsCaller,
-  ]);
+        // require the ephemeral sessionToken (callerToken) sent by server on accept
+        if (!sessionId || !remoteDeviceId || !localDeviceId || !user || !iceServers || !sessionToken) {
+          return;
+        }
+  
+        startAsCaller({
+        sessionId,
+          authToken: token, // JWT for socket auth
+          sessionToken,     // <<< REQUIRED: ephemeral webrtc session token
+          localUserId: user?._id ?? user?.id,
+          localDeviceId,
+          remoteDeviceId,
+          iceServers,       // pass server-provided TURN/STUN list
+        });
+      }, [
+        sessionId,
+        remoteDeviceId,
+        localDeviceId,
+        user,
+        token,
+        iceServers,
+        sessionToken,
+        startAsCaller,
+     ]);
 
   // 3) Hook up connection/DataChannel callbacks
   useEffect(() => {

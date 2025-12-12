@@ -81,8 +81,10 @@ export default function DeskLinkPage() {
       const remoteId = payload.hostDeviceId || payload.receiverDeviceId;
 
       navigate(
-        `/workspace/desklink/viewer?sessionId=${payload.sessionId}&remoteDeviceId=${remoteId}`
+        `/workspace/desklink/viewer?sessionId=${payload.sessionId}&remoteDeviceId=${remoteId}&sessionToken=${payload.callerToken}`
       );
+      
+      
     } else if (payload.status === 'rejected') {
       window.alert('Remote user rejected the DeskLink request.');
     }
