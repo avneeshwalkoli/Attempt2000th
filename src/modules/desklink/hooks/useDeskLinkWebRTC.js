@@ -1,4 +1,4 @@
-// useDeskLinkWebRTC.js
+// useDeskLinkWebRTC.js - FULLY FIXED VERSION
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { io } from 'socket.io-client';
 
@@ -16,10 +16,6 @@ function sleep(ms = 100) {
   return new Promise((res) => setTimeout(res, ms));
 }
 
-/**
- * DeskLink WebRTC Hook for Remote Desktop Sessions
- * Handles peer connection, datachannel, and signaling
- */
 export function useDeskLinkWebRTC() {
   const [connectionState, setConnectionState] = useState('new');
   const [iceConnectionState, setIceConnectionState] = useState('new');
@@ -44,11 +40,8 @@ export function useDeskLinkWebRTC() {
   const onConnectedRef = useRef(null);
   const onDisconnectedRef = useRef(null);
   const pendingRemoteIceCandidatesRef = useRef([]);
-  const attachedSocketListenersRef = useRef({}); // track functions we attached so we can remove them
+  const attachedSocketListenersRef = useRef({});
 
-  /**
-   * Start collecting WebRTC stats
-   */
   const startStatsCollection = useCallback(() => {
     if (statsIntervalRef.current) return;
 
@@ -82,9 +75,6 @@ export function useDeskLinkWebRTC() {
     }, 1000);
   }, []);
 
-  /**
-   * Stop collecting stats
-   */
   const stopStatsCollection = useCallback(() => {
     if (statsIntervalRef.current) {
       clearInterval(statsIntervalRef.current);
@@ -92,31 +82,33 @@ export function useDeskLinkWebRTC() {
     }
   }, []);
 
-  /**
-   * Initialize RTCPeerConnection with STUN/TURN config
-   */
   const createPeerConnection = useCallback(
-    async (iceServers) => {
-      // Reuse an existing PC if present (prevents double-creation)
+    async (iceServers, role) => {
       if (pcRef.current) {
-        console.warn('[WebRTC] PeerConnection already exists, reusing existing one');
+        console.warn('[WebRTC] PeerConnection already exists, reusing');
         return pcRef.current;
       }
+
+      console.log('[WebRTC] Creating PeerConnection with role:', role);
 
       const config = {
         iceServers: iceServers || TURN_ICE_SERVERS,
         iceCandidatePoolSize: 10,
         sdpSemantics: 'unified-plan',
+        bundlePolicy: 'max-bundle',
+        rtcpMuxPolicy: 'require',
       };
 
       const pc = new RTCPeerConnection(config);
       pcRef.current = pc;
 
       pc.onconnectionstatechange = () => {
-        setConnectionState(pc.connectionState);
-        console.log('[WebRTC] Connection state:', pc.connectionState);
+        const state = pc.connectionState;
+        setConnectionState(state);
+        console.log('[WebRTC] Connection state:', state);
 
-        if (pc.connectionState === 'connected') {
+        if (state === 'connected') {
+          console.log('[WebRTC] ✓✓✓ CONNECTED ✓✓✓');
           startStatsCollection();
 
           if (
@@ -128,14 +120,11 @@ export function useDeskLinkWebRTC() {
             try {
               onConnectedRef.current(remoteStreamRef.current);
             } catch (err) {
-              console.error('[WebRTC] Error in onConnected (state change):', err);
+              console.error('[WebRTC] Error in onConnected:', err);
             }
           }
-        } else if (
-          pc.connectionState === 'disconnected' ||
-          pc.connectionState === 'failed' ||
-          pc.connectionState === 'closed'
-        ) {
+        } else if (['disconnected', 'failed', 'closed'].includes(state)) {
+          console.log('[WebRTC] Connection failed/closed:', state);
           onDisconnectedRef.current?.();
           stopStatsCollection();
         }
@@ -147,13 +136,14 @@ export function useDeskLinkWebRTC() {
       };
 
       pc.ontrack = (event) => {
-        console.log('[WebRTC] Remote track received:', event.track.kind);
+        console.log('[WebRTC] ✓ Remote track received:', event.track.kind);
 
         setRemoteStream((prev) => {
           const stream = prev || new MediaStream();
           const alreadyThere = stream.getTracks().some((t) => t.id === event.track.id);
           if (!alreadyThere) {
             stream.addTrack(event.track);
+            console.log('[WebRTC] Track added to stream');
           }
           remoteStreamRef.current = stream;
 
@@ -170,7 +160,6 @@ export function useDeskLinkWebRTC() {
         });
       };
 
-      // Local ICE candidates → server
       pc.onicecandidate = (event) => {
         if (event.candidate && socketRef.current && sessionRef.current) {
           const {
@@ -181,66 +170,70 @@ export function useDeskLinkWebRTC() {
             localUserId,
           } = sessionRef.current;
 
-          try {
-            socketRef.current.emit('webrtc-ice', {
-              sessionId,
-              fromUserId: localUserId,
-              fromDeviceId: localDeviceId,
-              toDeviceId: remoteDeviceId,
-              candidate: event.candidate,
-              token: sessionToken,
-            });
-          } catch (err) {
-            console.warn('[WebRTC] Failed to emit ICE candidate:', err);
-          }
+          console.log('[WebRTC] Sending local ICE candidate');
+          
+          socketRef.current.emit('webrtc-ice', {
+            sessionId,
+            fromUserId: localUserId,
+            fromDeviceId: localDeviceId,
+            toDeviceId: remoteDeviceId,
+            candidate: event.candidate,
+            token: sessionToken,
+          });
         }
       };
 
-      // If this client was already marked as caller when PC created, create datachannel
-      if (sessionRef.current?.role === 'caller') {
-        // create datachannel only if none exists
-        if (!dataChannelRef.current) {
+      // ✅ CALLER: Create datachannel IMMEDIATELY
+      if (role === 'caller') {
+        console.log('[WebRTC] Creating datachannel (CALLER)...');
+        
+        const dc = pc.createDataChannel('desklink-control', {
+          ordered: true,
+          maxRetransmits: 3,
+        });
+
+        dc.onopen = () => {
+          console.log('[DataChannel] ✓✓✓ OPENED (caller) - readyState:', dc.readyState);
+        };
+
+        dc.onclose = () => {
+          console.log('[DataChannel] Closed (caller)');
+        };
+
+        dc.onerror = (err) => {
+          console.error('[DataChannel] Error (caller):', err);
+        };
+
+        dc.onmessage = (event) => {
           try {
-            const dc = pc.createDataChannel('desklink-control', {
-              ordered: true,
-              maxRetransmits: 3,
-            });
-
-            dc.onopen = () => {
-              console.log('[DataChannel] Opened - readyState=', dc.readyState);
-            };
-
-            dc.onclose = () => {
-              console.log('[DataChannel] Closed');
-            };
-
-            dc.onmessage = (event) => {
-              try {
-                const message = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
-                onDataMessageRef.current?.(message);
-              } catch (err) {
-                console.error('[DataChannel] Parse error:', err);
-              }
-            };
-
-            dataChannelRef.current = dc;
+            const message = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+            console.log('[DataChannel] Message received:', message.type);
+            onDataMessageRef.current?.(message);
           } catch (err) {
-            console.warn('[DataChannel] Failed to create as caller', err);
+            console.error('[DataChannel] Parse error:', err);
           }
-        }
+        };
+
+        dataChannelRef.current = dc;
+        console.log('[WebRTC] ✓ DataChannel created for caller');
       }
 
+      // ✅ RECEIVER: Wait for datachannel
       pc.ondatachannel = (event) => {
-        console.log('[DataChannel] Received datachannel (Receiver)');
+        console.log('[DataChannel] ✓✓✓ RECEIVED from caller (receiver)');
         const dc = event.channel;
         dataChannelRef.current = dc;
 
         dc.onopen = () => {
-          console.log('[DataChannel] Opened (receiver)');
+          console.log('[DataChannel] ✓ OPENED (receiver) - readyState:', dc.readyState);
         };
 
         dc.onclose = () => {
           console.log('[DataChannel] Closed (receiver)');
+        };
+
+        dc.onerror = (err) => {
+          console.error('[DataChannel] Error (receiver):', err);
         };
 
         dc.onmessage = (event) => {
@@ -258,9 +251,6 @@ export function useDeskLinkWebRTC() {
     [startStatsCollection, stopStatsCollection]
   );
 
-  /**
-   * Start as caller (controller)
-   */
   const startAsCaller = useCallback(
     async ({
       sessionId,
@@ -269,22 +259,22 @@ export function useDeskLinkWebRTC() {
       localUserId,
       localDeviceId,
       remoteDeviceId,
-      iceServers: providedIceServers, // optional
+      iceServers: providedIceServers,
     }) => {
       try {
         if (startedRef.current) {
-          console.log('[WebRTC] startAsCaller called but already started, skipping');
+          console.log('[WebRTC] Already started, skipping');
           return;
         }
 
-        console.log('[WebRTC] Starting as caller');
+        console.log('[WebRTC] ===== STARTING AS CALLER =====');
         startedRef.current = true;
 
-        // FORCE TURN if not provided
         if (!providedIceServers) {
           providedIceServers = TURN_ICE_SERVERS;
         }
 
+        // Set session FIRST
         sessionRef.current = {
           sessionId,
           sessionToken,
@@ -294,114 +284,144 @@ export function useDeskLinkWebRTC() {
           role: 'caller',
         };
 
-        // Socket selection: prefer global if present
+        // ✅ CRITICAL FIX: Setup socket and WAIT for it to connect before creating offer
         let socket;
-        if (typeof window !== 'undefined' && window.__desklinkSocket) {
-          socket = window.__desklinkSocket;
-          console.log('[WebRTC] Using shared app socket id=', socket.id);
-        } else {
-          socket = io(SOCKET_URL, {
-            auth: { token: authToken },
-            transports: ['websocket'],
-          });
-
-          // register local device on connect
-          const onLocalConnect = () => {
-            console.log('[WebRTC] Local caller socket connected', socket.id);
-            if (localDeviceId) {
-              socket.emit('register', { deviceId: localDeviceId });
+        const socketReady = new Promise((resolve, reject) => {
+          if (typeof window !== 'undefined' && window.__desklinkSocket) {
+            socket = window.__desklinkSocket;
+            console.log('[WebRTC] Using shared socket id=', socket.id);
+            if (socket.connected) {
+              resolve();
+            } else {
+              const onConnect = () => {
+                socket.off('connect', onConnect);
+                resolve();
+              };
+              socket.on('connect', onConnect);
             }
-          };
-          socket.on('connect', onLocalConnect);
+          } else {
+            console.log('[WebRTC] Creating new socket connection...');
+            socket = io(SOCKET_URL, {
+              auth: { token: authToken },
+              transports: ['websocket'],
+            });
 
-          // we will remove these listeners on cleanup if we created socket
-          attachedSocketListenersRef.current.localConnect = onLocalConnect;
+            const onLocalConnect = () => {
+              console.log('[WebRTC] Socket connected', socket.id);
+              if (localDeviceId) {
+                socket.emit('register', { deviceId: localDeviceId });
+                console.log('[WebRTC] Register emitted for', localDeviceId);
+              }
+              socket.off('connect', onLocalConnect);
+              // ✅ Wait a bit after register to ensure server processes it
+              setTimeout(() => resolve(), 300);
+            };
+            
+            socket.on('connect', onLocalConnect);
+            attachedSocketListenersRef.current.localConnect = onLocalConnect;
 
-          socket.on('connect_error', (err) => {
-            console.error('[WebRTC] Caller socket connect_error:', err?.message || err);
-          });
+            socket.on('connect_error', (err) => {
+              console.error('[WebRTC] Socket error:', err?.message || err);
+              reject(err);
+            });
 
-          socket.on('disconnect', (r) => {
-            console.warn('[WebRTC] Caller socket disconnected:', r);
-          });
-        }
+            // Timeout after 10 seconds
+            setTimeout(() => reject(new Error('Socket connection timeout')), 10000);
+          }
+        });
 
-        // store socket
         socketRef.current = socket;
 
-        // attach answer handler
+        // ✅ WAIT for socket to be fully ready
+        console.log('[WebRTC] Waiting for socket to be ready...');
+        await socketReady;
+        console.log('[WebRTC] ✓ Socket ready, proceeding with WebRTC setup');
+
+        // Answer handler
         const onAnswer = async ({ sdp, sessionId: sid }) => {
           try {
-            console.log('[WebRTC] webrtc-answer RECEIVED (caller) for session', sid);
+            console.log('[WebRTC] ===== ANSWER RECEIVED =====');
             const pc = pcRef.current;
             if (!pc) {
-              console.warn('[WebRTC] pc missing when answer received');
+              console.warn('[WebRTC] PC missing when answer received');
               return;
             }
+            
+            console.log('[WebRTC] Setting remote description (answer)...');
             await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp }));
-            console.log('[WebRTC] Remote description set (answer)');
+            console.log('[WebRTC] ✓ Remote description set (answer)');
 
-            // apply buffered candidates now
+            // Apply buffered ICE candidates
             const buffered = pendingRemoteIceCandidatesRef.current || [];
             if (buffered.length > 0) {
               console.log('[WebRTC] Applying', buffered.length, 'buffered ICE candidates');
               for (const c of buffered) {
                 try {
                   await pc.addIceCandidate(new RTCIceCandidate(c));
+                  console.log('[WebRTC] ✓ Applied buffered ICE');
                 } catch (err) {
-                  console.error('[WebRTC] Error applying buffered ICE candidate:', err);
+                  console.error('[WebRTC] Error applying buffered ICE:', err);
                 }
               }
               pendingRemoteIceCandidatesRef.current = [];
             }
           } catch (err) {
-            console.error('[WebRTC] Error handling webrtc-answer (caller):', err);
+            console.error('[WebRTC] Error handling answer:', err);
           }
         };
 
         const onIce = async ({ candidate, sessionId: sid }) => {
           try {
-            // basic guard
             if (!candidate || !candidate.candidate) return;
 
             const pc = pcRef.current;
 
-            // if PC or remoteDescription not ready → buffer and return
             if (!pc || !pc.remoteDescription) {
-              console.log('[WebRTC] Buffering ICE (caller) — PC/remoteDesc not ready');
+              console.log('[WebRTC] Buffering ICE (caller) — remoteDesc not ready');
               pendingRemoteIceCandidatesRef.current.push(candidate);
               return;
             }
 
             await pc.addIceCandidate(new RTCIceCandidate(candidate));
-            console.log('[WebRTC] Added ICE candidate (caller)');
+            console.log('[WebRTC] ✓ Added ICE candidate (caller)');
           } catch (err) {
             console.error('[WebRTC] Error adding ICE (caller):', err);
           }
         };
 
-        // attach handlers (safe to attach even on shared socket)
         socket.on('webrtc-answer', onAnswer);
         socket.on('webrtc-ice', onIce);
 
-        // save so we can remove them later
         attachedSocketListenersRef.current['webrtc-answer'] = onAnswer;
         attachedSocketListenersRef.current['webrtc-ice'] = onIce;
 
-        // create PC (ensures datachannel created for caller)
-        const pc = await createPeerConnection(providedIceServers);
+        // Create PC with explicit 'caller' role (datachannel created inside)
+        const pc = await createPeerConnection(providedIceServers, 'caller');
 
-        // create offer and set local desc
+        // Verify datachannel
+        if (!dataChannelRef.current) {
+          throw new Error('❌ CRITICAL: DataChannel was NOT created!');
+        }
+        console.log('[WebRTC] ✓ DataChannel verified, readyState:', dataChannelRef.current.readyState);
+
+        // Wait for datachannel to be ready
+        await sleep(200);
+
+        // Create offer
+        console.log('[WebRTC] Creating offer...');
         const offer = await pc.createOffer({
           offerToReceiveVideo: true,
           offerToReceiveAudio: false,
         });
+        
         await pc.setLocalDescription(offer);
+        console.log('[WebRTC] ✓ Local description set (offer)');
 
-        // small delay to ensure remote is ready to receive the offer
-        await sleep(120);
+        // Small delay before sending
+        await sleep(150);
 
-        // emit offer
+        // Emit offer
+        console.log('[WebRTC] Sending offer to', remoteDeviceId);
         socket.emit('webrtc-offer', {
           sessionId,
           fromUserId: localUserId,
@@ -411,21 +431,16 @@ export function useDeskLinkWebRTC() {
           token: sessionToken,
         });
 
-        console.log('[WebRTC] Offer SENT (caller) to', remoteDeviceId);
+        console.log('[WebRTC] ✓✓✓ OFFER SENT ✓✓✓');
       } catch (err) {
         startedRef.current = false;
-        console.error('[WebRTC] Error in startAsCaller:', err);
+        console.error('[WebRTC] ✗ Error in startAsCaller:', err);
         throw err;
       }
     },
     [createPeerConnection]
   );
 
-  /**
-   * Handle incoming offer (receiver/host) — browser-side receiver support.
-   * In your current setup NodeHelper is the receiver so browser rarely uses this,
-   * but we keep it correct for completeness.
-   */
   const handleOffer = useCallback(
     async ({ sessionId, authToken, sessionToken, localUserId, localDeviceId, remoteDeviceId, sdp }) => {
       try {
@@ -434,7 +449,7 @@ export function useDeskLinkWebRTC() {
           return;
         }
 
-        console.log('[WebRTC] Handling offer (receiver)');
+        console.log('[WebRTC] ===== HANDLING OFFER (RECEIVER) =====');
 
         sessionRef.current = {
           sessionId,
@@ -458,51 +473,49 @@ export function useDeskLinkWebRTC() {
           }
         });
 
-        socket.on('connect_error', (err) => {
-          console.error('[WebRTC] socket connect_error (receiver)', err?.message || err);
-        });
-
         socket.on('webrtc-ice', async ({ candidate, sessionId: sid }) => {
           try {
             const pc = pcRef.current;
-            if (pc && candidate && candidate.candidate) {
+            if (pc && pc.remoteDescription && candidate && candidate.candidate) {
               await pc.addIceCandidate(new RTCIceCandidate(candidate));
-              console.log('[WebRTC] (receiver) Added remote ICE for', sid);
+              console.log('[WebRTC] (receiver) ✓ Added remote ICE');
             } else {
-              // buffer if pc not ready
               pendingRemoteIceCandidatesRef.current.push(candidate);
-              console.log('[WebRTC] (receiver) Buffered ICE candidate because pc not ready');
+              console.log('[WebRTC] (receiver) Buffered ICE candidate');
             }
           } catch (err) {
-            console.error('[WebRTC] (receiver) Error adding ICE candidate:', err);
+            console.error('[WebRTC] (receiver) Error adding ICE:', err);
           }
         });
 
-        // create PC and ensure tracks/datachannel handlers
-        const pc = await createPeerConnection(TURN_ICE_SERVERS);
+        // Create PC with 'receiver' role
+        const pc = await createPeerConnection(TURN_ICE_SERVERS, 'receiver');
 
-        // set remote (offer) then create+send answer
+        console.log('[WebRTC] Setting remote description (offer)...');
         await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp }));
+        console.log('[WebRTC] ✓ Remote description set');
 
-        // apply any buffered ICE now (common case)
+        // Apply buffered ICE
         if (pendingRemoteIceCandidatesRef.current.length > 0) {
-          console.log('[WebRTC] (receiver) Applying buffered ICE count=', pendingRemoteIceCandidatesRef.current.length);
+          console.log('[WebRTC] Applying buffered ICE count=', pendingRemoteIceCandidatesRef.current.length);
           for (const c of pendingRemoteIceCandidatesRef.current) {
             try {
               await pc.addIceCandidate(new RTCIceCandidate(c));
             } catch (err) {
-              console.error('[WebRTC] (receiver) Error applying buffered ICE:', err);
+              console.error('[WebRTC] Error applying buffered ICE:', err);
             }
           }
           pendingRemoteIceCandidatesRef.current = [];
         }
 
+        console.log('[WebRTC] Creating answer...');
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
+        console.log('[WebRTC] ✓ Local description set (answer)');
 
-        // small delay to ensure our socket and PC have stabilized
         await sleep(100);
 
+        console.log('[WebRTC] Sending answer...');
         socket.emit('webrtc-answer', {
           sessionId,
           fromUserId: localUserId,
@@ -512,7 +525,7 @@ export function useDeskLinkWebRTC() {
           token: sessionToken,
         });
 
-        console.log('[WebRTC] (receiver) Answer sent');
+        console.log('[WebRTC] ✓ Answer sent');
       } catch (err) {
         console.error('[WebRTC] Error handling offer:', err);
         throw err;
@@ -521,15 +534,11 @@ export function useDeskLinkWebRTC() {
     [createPeerConnection]
   );
 
-  /**
-   * Add ICE candidate manually (not usually necessary)
-   */
   const addIceCandidate = useCallback(async (candidate) => {
     try {
-      if (pcRef.current && candidate && candidate.candidate) {
+      if (pcRef.current && pcRef.current.remoteDescription && candidate && candidate.candidate) {
         await pcRef.current.addIceCandidate(new RTCIceCandidate(candidate));
       } else {
-        // buffer if not ready
         pendingRemoteIceCandidatesRef.current.push(candidate);
       }
     } catch (err) {
@@ -537,29 +546,22 @@ export function useDeskLinkWebRTC() {
     }
   }, []);
 
-  /**
-   * Send control message via datachannel
-   */
   const sendControlMessage = useCallback((message) => {
     if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
       const payload = typeof message === 'string' ? message : JSON.stringify(message);
       dataChannelRef.current.send(payload);
+      console.log('[DataChannel] Message sent:', message.type || 'unknown');
     } else {
-      console.warn('[DataChannel] Not open, cannot send message');
+      console.warn('[DataChannel] Not open (state:', dataChannelRef.current?.readyState || 'null', ')');
     }
   }, []);
 
-  /**
-   * Stop session and cleanup
-   */
   const stopSession = useCallback(() => {
-    console.log('[WebRTC] Stopping session');
+    console.log('[WebRTC] ===== STOPPING SESSION =====');
 
     stopStatsCollection();
-
     hasFiredConnectedRef.current = false;
 
-    // Close datachannel
     if (dataChannelRef.current) {
       try {
         dataChannelRef.current.close();
@@ -567,7 +569,6 @@ export function useDeskLinkWebRTC() {
       dataChannelRef.current = null;
     }
 
-    // Close peer connection
     if (pcRef.current) {
       try {
         pcRef.current.close();
@@ -575,57 +576,46 @@ export function useDeskLinkWebRTC() {
       pcRef.current = null;
     }
 
-    // Socket cleanup: remove listeners we attached and disconnect if local
     if (socketRef.current) {
       try {
-        // if this is the shared app socket, do not disconnect it; only remove listeners
-        const isSharedSocket =
-          typeof window !== 'undefined' &&
-          window.__desklinkSocket &&
-          window.__desklinkSocket === socketRef.current;
-
-        // remove the main handlers we may have attached
         Object.entries(attachedSocketListenersRef.current || {}).forEach(([k, fn]) => {
-          try {
-            if (k === 'localConnect') {
-              socketRef.current.off('connect', fn);
-            } else {
-              socketRef.current.off(k, fn);
-            }
-          } catch (e) {}
+          if (k === 'localConnect') {
+            socketRef.current.off('connect', fn);
+          } else {
+            socketRef.current.off(k, fn);
+          }
         });
 
         attachedSocketListenersRef.current = {};
 
-        // send cancel
         if (sessionRef.current) {
-          try {
-            socketRef.current.emit('webrtc-cancel', {
-              sessionId: sessionRef.current.sessionId,
-              fromUserId: sessionRef.current.localUserId,
-            });
-          } catch (e) {}
+          socketRef.current.emit('webrtc-cancel', {
+            sessionId: sessionRef.current.sessionId,
+            fromUserId: sessionRef.current.localUserId,
+          });
         }
 
-        if (!isSharedSocket) {
+        // ---- Start replacement (useDeskLinkWebRTC.js) ----
+        const globalSocket = (typeof window !== 'undefined') ? window.__desklinkSocket : null;
+        const isSharedSocket = globalSocket && globalSocket === socketRef.current;
+        if (!isSharedSocket && socketRef.current) {
           try {
+            console.log('[WebRTC] stopSession: disconnecting local socket (not shared)');
             socketRef.current.disconnect();
-          } catch (e) {}
+          } catch (e) {
+            console.warn('[WebRTC] stopSession: error disconnecting socket', e);
+          }
         } else {
-          // remove only webrtc handlers if shared socket
-          try {
-            socketRef.current.off('webrtc-answer');
-            socketRef.current.off('webrtc-ice');
-            socketRef.current.off('webrtc-offer');
-          } catch (e) {}
+          console.log('[WebRTC] stopSession: socket is shared — leaving it connected');
         }
+        // ---- End replacement ----
+
       } catch (e) {
-        console.warn('[WebRTC] socket cleanup err', e);
+        console.warn('[WebRTC] Socket cleanup error', e);
       }
       socketRef.current = null;
     }
 
-    // Stop remote stream tracks
     if (remoteStreamRef.current) {
       try {
         remoteStreamRef.current.getTracks().forEach((t) => t.stop());
@@ -642,9 +632,6 @@ export function useDeskLinkWebRTC() {
     pendingRemoteIceCandidatesRef.current = [];
   }, [stopStatsCollection]);
 
-  /**
-   * Cleanup on unmount
-   */
   useEffect(() => {
     return () => {
       stopSession();

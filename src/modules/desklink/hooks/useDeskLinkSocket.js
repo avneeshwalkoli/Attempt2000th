@@ -66,14 +66,25 @@ export function useDeskLinkSocket({ token, onRemoteRequest, onRemoteResponse }) 
     });
 
     return () => {
-      try {
-        s.disconnect();
-      } catch (e) {}
-      if (typeof window !== 'undefined' && window.__desklinkSocket === s) {
-        try {
-          window.__desklinkSocket = undefined;
-        } catch (e) {}
+       try {
+    const globalSocket = (typeof window !== 'undefined') ? window.__desklinkSocket : null;
+    // If the socket we created is the same as the global shared socket, we should disconnect it.
+    // If it's NOT the global socket (i.e., some other component owns the shared socket), leave it running.
+    const weCreatedShared = globalSocket === socketRef.current;
+
+    if (weCreatedShared) {
+      console.log('[useDeskLinkSocket] cleanup: we created the shared socket — disconnecting');
+      socketRef.current?.disconnect();
+      if (typeof window !== 'undefined' && window.__desklinkSocket === socketRef.current) {
+        window.__desklinkSocket = undefined;
       }
+    } else {
+      console.log('[useDeskLinkSocket] cleanup: not owner of shared socket — leaving it connected');
+      // don't disconnect shared socket owned by another component
+    }
+  } catch (err) {
+    console.warn('[useDeskLinkSocket] cleanup error', err);
+  }
       socketRef.current = null;
       setSocket(null);
     };

@@ -15,6 +15,7 @@ public class SocketClient : IAsyncDisposable
     private SocketIOClient.SocketIO? _client;
     private WebRTCLauncher? _webrtcLauncher;
     private string? _agentJwt;
+    private string? _ownerUserId;
 
     public SocketClient(string deviceId, AgentIpcServer ipc)
     {
@@ -72,8 +73,9 @@ public class SocketClient : IAsyncDisposable
 
         Console.WriteLine("[Agent] Provision success for user=" + ownerUserId);
 
-        // Cache agentJwt for use by WebRTC helper
+        // Cache agentJwt and ownerUserId for use by WebRTC helper
         _agentJwt = agentJwt;
+        _ownerUserId = ownerUserId;
 
         // Use fully-qualified type to avoid namespace/type ambiguity
         _client = new SocketIOClient.SocketIO(serverUrl, new SocketIOOptions
@@ -194,11 +196,17 @@ public class SocketClient : IAsyncDisposable
                 return;
             }
 
+            if (string.IsNullOrWhiteSpace(_ownerUserId))
+            {
+                Console.Error.WriteLine("[Socket] Cannot start WebRTC: missing ownerUserId.");
+                return;
+            }
+
             _webrtcLauncher = new WebRTCLauncher(
                 sessionId,
                 token,
                 _deviceId,
-                "agent-user-id", // TODO: replace with real user id
+                _ownerUserId!,
                 remoteDeviceId,
                 role,
                 serverUrl,

@@ -1,6 +1,6 @@
 /**
- * DeskLink Agent - Node.js WebRTC Helper
- * * Dependencies:
+ * DeskLink Agent - Node.js WebRTC Helper (FIXED)
+ * Dependencies:
  * npm install wrtc socket.io-client robotjs screenshot-desktop pngjs
  */
 
@@ -12,7 +12,7 @@ const { RTCVideoSource } = nonstandard;
 const io = require('socket.io-client');
 const robot = require('robotjs');
 const screenshot = require('screenshot-desktop');
-const { PNG } = require('pngjs');   // for decoding PNG screenshots
+const { PNG } = require('pngjs');
 
 const TURN_ICE_SERVERS = [
   { urls: "stun:stun.l.google.com:19302" },
@@ -23,17 +23,17 @@ const TURN_ICE_SERVERS = [
   },
 ];
 
-// Configuration from command line args
+// Configuration
 const args = process.argv.slice(2);
 const config = {
   serverUrl: args[0] || 'https://anydesk.onrender.com',
   sessionId: args[1],
-  token: args[2],             // session token for WebRTC validation
+  token: args[2],
   deviceId: args[3],
   userId: args[4],
   remoteDeviceId: args[5],
-  role: args[6] || 'receiver', // 'caller' or 'receiver'
-  agentJwt: args[7],          // JWT for Socket.IO auth
+  role: args[6] || 'receiver',
+  agentJwt: args[7],
 };
 
 console.error('[NodeHelper] Starting with config:', JSON.stringify(config, null, 2));
@@ -57,12 +57,20 @@ let videoTrack = null;
  * Initialize WebRTC peer connection
  */
 function initPeerConnection(iceServers) {
-  console.error('[WebRTC] initPeerConnection with iceServers:', JSON.stringify(iceServers));
+  console.error('[WebRTC] ===== INITIALIZING PEER CONNECTION =====');
+  console.error('[WebRTC] Role:', config.role);
+  console.error('[WebRTC] ICE Servers:', JSON.stringify(iceServers));
   
-  peerConnection = new RTCPeerConnection({ iceServers });
+  // ✅ FIX: Add bundle policy to ensure single transport
+  peerConnection = new RTCPeerConnection({ 
+    iceServers,
+    bundlePolicy: 'max-bundle',
+    rtcpMuxPolicy: 'require',
+  });
 
   peerConnection.onicecandidate = (event) => {
     if (event.candidate && socket) {
+      console.error('[WebRTC] Sending local ICE candidate');
       socket.emit('webrtc-ice', {
         sessionId: config.sessionId,
         fromUserId: config.userId,
@@ -71,16 +79,23 @@ function initPeerConnection(iceServers) {
         candidate: event.candidate,
         token: config.token,
       });
+    } else if (!event.candidate) {
+      console.error('[WebRTC] ICE gathering complete');
     }
   };
 
+  // ✅ CRITICAL FIX: Ensure ondatachannel fires for receiver
   peerConnection.ondatachannel = (event) => {
-    console.error('[WebRTC] Data channel received');
+    console.error('[WebRTC] ===== DATACHANNEL EVENT FIRED =====');
+    console.error('[WebRTC] ✓✓✓ Data channel RECEIVED from caller ✓✓✓');
+    console.error('[WebRTC] Channel label:', event.channel.label);
+    console.error('[WebRTC] Channel readyState:', event.channel.readyState);
+    console.error('[WebRTC] Channel id:', event.channel.id);
+    
     dataChannel = event.channel;
     setupDataChannel();
   };
 
-  // --- ENHANCED CONNECTION STATE LOGGING ---
   peerConnection.onconnectionstatechange = () => {
     const state = peerConnection.connectionState;
     console.error('[WebRTC] ===== CONNECTION STATE CHANGE =====');
@@ -90,6 +105,14 @@ function initPeerConnection(iceServers) {
       console.error('[WebRTC] Attempting to connect...');
     } else if (state === 'connected') {
       console.error('[WebRTC] ✓✓✓ CONNECTED SUCCESSFULLY ✓✓✓');
+      
+      // ✅ Check datachannel status after connection
+      if (dataChannel) {
+        console.error('[DataChannel] Status after connection - readyState:', dataChannel.readyState);
+      } else {
+        console.error('[DataChannel] WARNING: No datachannel after connection!');
+      }
+      
       if (config.role === 'receiver') {
         console.error('[Screen] Starting screen capture as receiver');
         startScreenCapture();
@@ -99,7 +122,6 @@ function initPeerConnection(iceServers) {
       console.error('[WebRTC] ICE connection state:', peerConnection.iceConnectionState);
       console.error('[WebRTC] Signaling state:', peerConnection.signalingState);
       
-      // Get more details about why it failed
       peerConnection.getStats().then(stats => {
         stats.forEach(report => {
           if (report.type === 'candidate-pair') {
@@ -107,8 +129,6 @@ function initPeerConnection(iceServers) {
               state: report.state,
               priority: report.priority,
               nominated: report.nominated,
-              localCandidate: report.localCandidateId,
-              remoteCandidate: report.remoteCandidateId
             });
           }
         });
@@ -120,35 +140,43 @@ function initPeerConnection(iceServers) {
     }
   };
 
-  // --- ENHANCED ICE CONNECTION STATE LOGGING ---
   peerConnection.oniceconnectionstatechange = () => {
     console.error('[WebRTC] ICE connection state:', peerConnection.iceConnectionState);
      
-    if (peerConnection.iceConnectionState === 'failed') {
-      console.error('[WebRTC] ICE connection failed - checking candidates...');
+    if (peerConnection.iceConnectionState === 'checking') {
+      console.error('[WebRTC] ICE checking candidates...');
+    } else if (peerConnection.iceConnectionState === 'connected') {
+      console.error('[WebRTC] ICE connected!');
+    } else if (peerConnection.iceConnectionState === 'completed') {
+      console.error('[WebRTC] ICE completed!');
+    } else if (peerConnection.iceConnectionState === 'failed') {
+      console.error('[WebRTC] ✗ ICE connection failed');
       peerConnection.getStats().then(stats => {
         stats.forEach(report => {
           if (report.type === 'local-candidate') {
-            console.error('[ICE] Local candidate:', report.candidateType, report.address, report.protocol);
+            console.error('[ICE] Local candidate:', report.candidateType, report.protocol);
           }
           if (report.type === 'remote-candidate') {
-            console.error('[ICE] Remote candidate:', report.candidateType, report.address, report.protocol);
+            console.error('[ICE] Remote candidate:', report.candidateType, report.protocol);
           }
         });
       });
     }
   };
 
-  // If we are the receiver, we need to add the video track immediately
-  // so it is available when the offer/answer negotiation happens.
+  peerConnection.onsignalingstatechange = () => {
+    console.error('[WebRTC] Signaling state:', peerConnection.signalingState);
+  };
+
+  // ✅ If receiver: add video track BEFORE negotiation
   if (config.role === 'receiver') {
     try {
       videoSource = new RTCVideoSource();
       videoTrack = videoSource.createTrack();
       const sender = peerConnection.addTrack(videoTrack);
-      console.error('[WebRTC] Video track added from agent:', sender.track.id);
+      console.error('[WebRTC] ✓ Video track added from agent:', sender.track.id);
     } catch (err) {
-      console.error('[WebRTC] Error creating video track:', err);
+      console.error('[WebRTC] ✗ Error creating video track:', err);
     }
   }
 
@@ -159,24 +187,49 @@ function initPeerConnection(iceServers) {
  * Setup data channel for control messages
  */
 function setupDataChannel() {
-  if (!dataChannel) return;
+  if (!dataChannel) {
+    console.error('[DataChannel] ✗ setupDataChannel called but dataChannel is null!');
+    return;
+  }
+
+  console.error('[DataChannel] ===== SETTING UP DATACHANNEL =====');
+  console.error('[DataChannel] Current readyState:', dataChannel.readyState);
 
   dataChannel.onopen = () => {
-    console.error('[DataChannel] Opened');
+    console.error('[DataChannel] ✓✓✓ OPENED ✓✓✓ - readyState:', dataChannel.readyState);
+    
+    // Send a test message
+    try {
+      dataChannel.send(JSON.stringify({ type: 'ready', message: 'Agent ready' }));
+      console.error('[DataChannel] ✓ Test message sent');
+    } catch (err) {
+      console.error('[DataChannel] ✗ Error sending test message:', err);
+    }
   };
 
   dataChannel.onmessage = (event) => {
     try {
       const message = JSON.parse(event.data);
+      console.error('[DataChannel] ✓ Message received:', message.type);
       handleControlMessage(message);
     } catch (err) {
-      console.error('[DataChannel] Error parsing message:', err);
+      console.error('[DataChannel] ✗ Error parsing message:', err);
     }
   };
 
   dataChannel.onclose = () => {
     console.error('[DataChannel] Closed');
   };
+
+  dataChannel.onerror = (err) => {
+    console.error('[DataChannel] ✗ Error:', err);
+  };
+
+  // If already open, trigger onopen manually
+  if (dataChannel.readyState === 'open') {
+    console.error('[DataChannel] Already open, triggering onopen');
+    dataChannel.onopen();
+  }
 }
 
 // ======================================================
@@ -232,10 +285,7 @@ function handleMouseClick(message) {
 }
 
 function handleMouseWheel(message) {
-  // robotjs scroll is: robot.scrollMouse(x, y);
-  // message usually has deltaY. Simple implementation:
   if (message.deltaY) {
-    // Basic scaling for scrolling
     const scrollAmount = message.deltaY > 0 ? -10 : 10; 
     robot.scrollMouse(0, scrollAmount);
   }
@@ -262,11 +312,10 @@ function normalizeKey(key) {
   if (KEY_MAP[key]) return KEY_MAP[key];
   if (/^[A-Z]$/.test(key)) return key.toLowerCase();
   if (/^\d$/.test(key)) return key;
-  return key.toLowerCase(); // Fallback for other chars
+  return key.toLowerCase();
 }
 
 function handleKeyPress(message) {
-  // Security guard
   if (message.modifiers?.ctrl && message.modifiers?.alt && message.key === 'Delete') {
     console.error('[Control] Blocked Ctrl+Alt+Del');
     return;
@@ -284,8 +333,6 @@ function handleKeyPress(message) {
         (k) => message.modifiers[k]
       );
       
-      // keyTap creates a press and release. 
-      // For more complex key holding, you'd need keyToggle, but keyTap is safer for basics.
       robot.keyTap(key, mods);
     }
   } catch (err) {
@@ -294,7 +341,7 @@ function handleKeyPress(message) {
 }
 
 function handleClipboard(message) {
-  console.error('[Control] Clipboard sync not implemented in this prototype');
+  console.error('[Control] Clipboard sync not implemented');
 }
 
 // ======================================================
@@ -303,7 +350,7 @@ function handleClipboard(message) {
 
 async function startScreenCapture() {
   if (!videoSource) {
-    console.error('[Screen] Cannot start capture: videoSource is not initialized');
+    console.error('[Screen] ✗ Cannot start capture: videoSource is not initialized');
     return;
   }
   if (screenCaptureInterval) {
@@ -311,41 +358,35 @@ async function startScreenCapture() {
     return;
   }
 
-  console.error('[Screen] Starting capture loop...');
+  console.error('[Screen] ===== STARTING SCREEN CAPTURE =====');
   const FPS = 10; 
   const interval = 1000 / FPS;
 
   screenCaptureInterval = setInterval(async () => {
     try {
-      // 1) Grab a screenshot as PNG buffer
       const imgBuffer = await screenshot({ format: 'png' });
-
-      // 2) Decode PNG into raw RGBA pixels
       const png = PNG.sync.read(imgBuffer);
       const { width, height, data: rgba } = png;
 
       const frameSize = width * height;
       const yPlaneSize = frameSize;
-      const uvPlaneSize = frameSize >> 2; // /4
+      const uvPlaneSize = frameSize >> 2;
 
-      // 3) Allocate I420 buffer: Y (full), U (1/4), V (1/4)
       const i420 = Buffer.alloc(yPlaneSize + uvPlaneSize + uvPlaneSize);
 
-      // 4) Fill Y plane from RGB luma (Grayscale)
+      // Convert RGBA to I420
       for (let i = 0; i < frameSize; i++) {
         const r = rgba[i * 4];
         const g = rgba[i * 4 + 1];
         const b = rgba[i * 4 + 2];
 
-        // Standard BT.601 luma
         let y = 0.257 * r + 0.504 * g + 0.098 * b + 16;
         i420[i] = Math.max(0, Math.min(255, y));
       }
 
-      // 5) Set U and V planes to neutral grey (128) -> No color
+      // Fill U and V planes with neutral gray
       i420.fill(128, yPlaneSize, yPlaneSize + uvPlaneSize + uvPlaneSize);
 
-      // 6) Push the frame to RTCVideoSource
       videoSource.onFrame({
         width,
         height,
@@ -355,6 +396,8 @@ async function startScreenCapture() {
       console.error('[Screen] Capture error:', err);
     }
   }, interval);
+  
+  console.error('[Screen] ✓ Capture started at', FPS, 'FPS');
 }
 
 function stopScreenCapture() {
@@ -384,7 +427,8 @@ function initSocket() {
     token: config.agentJwt,
   };
 
-  console.error('[Socket] initSocket: connecting to', config.serverUrl);
+  console.error('[Socket] ===== INITIALIZING SOCKET =====');
+  console.error('[Socket] Connecting to:', config.serverUrl);
 
   socket = io(config.serverUrl, {
     auth: authPayload,
@@ -395,33 +439,42 @@ function initSocket() {
   });
 
   socket.on('connect', async () => {
-    console.error('[Socket] Connected - id=', socket.id);
+    console.error('[Socket] ✓ Connected - id=', socket.id);
 
-    // 1. Register device
     socket.emit('register', { deviceId: config.deviceId });
     socket.emit('register-complete', { deviceId: config.deviceId });
 
-    // 2. Init PeerConnection ONCE
+    // ✅ Initialize PC only once
     if (!peerConnection) {
       initPeerConnection(TURN_ICE_SERVERS);
     }
 
-    // 3. If caller, create Offer
+    // ✅ CALLER: Create datachannel and offer
     if (config.role === 'caller') {
       try {
-        console.error('[NodeHelper] Creating DataChannel and Offer as Caller');
+        console.error('[NodeHelper] ===== ROLE: CALLER =====');
+        console.error('[NodeHelper] Creating DataChannel and Offer...');
 
+        // Create datachannel first
         dataChannel = peerConnection.createDataChannel('desklink-control', {
           ordered: true,
           maxRetransmits: 3,
         });
         setupDataChannel();
+        
+        console.error('[NodeHelper] ✓ DataChannel created');
 
+        // Wait a bit for datachannel to initialize
+        await new Promise(resolve => setTimeout(resolve, 200));
+
+        // Then create offer
         const offer = await peerConnection.createOffer({
           offerToReceiveVideo: true,
           offerToReceiveAudio: false,
         });
         await peerConnection.setLocalDescription(offer);
+
+        console.error('[NodeHelper] ✓ Offer created and local description set');
 
         socket.emit('webrtc-offer', {
           sessionId: config.sessionId,
@@ -431,13 +484,18 @@ function initSocket() {
           sdp: offer.sdp,
           token: config.token,
         });
+        
+        console.error('[WebRTC] ✓✓✓ OFFER SENT to', config.remoteDeviceId);
       } catch (err) {
-        console.error('[Caller] Error creating offer:', err);
+        console.error('[Caller] ✗ Error creating offer:', err);
       }
+    } else {
+      console.error('[NodeHelper] ===== ROLE: RECEIVER =====');
+      console.error('[NodeHelper] Waiting for offer from caller...');
     }
   });
 
-  // --- ENHANCED WEBRTC OFFER HANDLER ---
+  // ✅ RECEIVER: Handle incoming offer
   socket.on('webrtc-offer', async ({ sdp, sessionId, fromUserId, fromDeviceId, toDeviceId, token }) => {
     console.error('[Socket] ===== RECEIVED OFFER =====');
     console.error('[Socket] sessionId:', sessionId);
@@ -448,17 +506,17 @@ function initSocket() {
      
     try {
       if (!peerConnection) {
-        console.error('[WebRTC] Creating new PeerConnection for incoming offer');
+        console.error('[WebRTC] Creating PeerConnection for incoming offer');
         initPeerConnection(TURN_ICE_SERVERS);
       }
    
-      console.error('[WebRTC] Setting remote description (offer)');
+      console.error('[WebRTC] Setting remote description (offer)...');
       await peerConnection.setRemoteDescription(
         new RTCSessionDescription({ type: 'offer', sdp })
       );
       console.error('[WebRTC] ✓ Remote description set');
    
-      // Apply buffered ICE candidates
+      // ✅ Apply buffered ICE candidates
       if (pendingRemoteIceCandidates.length > 0) {
         console.error('[WebRTC] Applying', pendingRemoteIceCandidates.length, 'buffered ICE candidates');
         for (const c of pendingRemoteIceCandidates) {
@@ -472,8 +530,12 @@ function initSocket() {
         pendingRemoteIceCandidates = [];
       }
    
-      console.error('[WebRTC] Creating answer');
+      console.error('[WebRTC] Creating answer...');
       const answer = await peerConnection.createAnswer();
+      
+      // Log DTLS role
+      console.error('[WebRTC] Answer SDP setup role:', answer.sdp.includes('setup:active') ? 'active' : 'passive');
+      
       await peerConnection.setLocalDescription(answer);
       console.error('[WebRTC] ✓ Local description set (answer)');
    
@@ -483,14 +545,13 @@ function initSocket() {
         fromDeviceId: config.deviceId,
         toDeviceId: fromDeviceId,
         sdp: answer.sdp,
-        token: token || config.token,
+        token: config.token,
       };
    
       console.error('[Socket] Emitting answer to device:', fromDeviceId);
-      console.error('[Socket] Answer payload:', JSON.stringify(answerPayload, null, 2));
        
       socket.emit('webrtc-answer', answerPayload);
-      console.error('[WebRTC] ✓ Answer sent');
+      console.error('[WebRTC] ✓✓✓ ANSWER SENT ✓✓✓');
     } catch (err) {
       console.error('[WebRTC] ✗✗✗ ERROR handling offer:', err);
       console.error('[WebRTC] Error stack:', err.stack);
@@ -498,15 +559,29 @@ function initSocket() {
   });
 
   socket.on('webrtc-answer', async ({ sdp, sessionId }) => {
-    console.error('[Socket] Received answer for session', sessionId);
+    console.error('[Socket] ===== RECEIVED ANSWER =====');
+    console.error('[Socket] sessionId:', sessionId);
     try {
       await peerConnection.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp }));
+      console.error('[WebRTC] ✓ Remote description set (answer)');
+      
+      // Apply buffered ICE
+      if (pendingRemoteIceCandidates.length > 0) {
+        console.error('[WebRTC] Applying', pendingRemoteIceCandidates.length, 'buffered ICE candidates');
+        for (const c of pendingRemoteIceCandidates) {
+          try {
+            await peerConnection.addIceCandidate(new RTCIceCandidate(c));
+          } catch (err) {
+            console.error('[WebRTC] Error applying buffered ICE:', err);
+          }
+        }
+        pendingRemoteIceCandidates = [];
+      }
     } catch (err) {
-      console.error('[WebRTC] Error handling answer:', err);
+      console.error('[WebRTC] ✗ Error handling answer:', err);
     }
   });
 
-  // --- ENHANCED WEBRTC ICE HANDLER ---
   socket.on('webrtc-ice', async ({ candidate, sessionId, fromDeviceId, toDeviceId }) => {
     try {
       if (!candidate || !candidate.candidate) {
@@ -515,8 +590,8 @@ function initSocket() {
       }
    
       console.error('[WebRTC] Received ICE candidate from:', fromDeviceId);
-      console.error('[WebRTC] ICE candidate:', candidate.candidate.substring(0, 50) + '...');
    
+      // ✅ FIX: Buffer ICE if remote description not set yet
       if (!peerConnection || !peerConnection.remoteDescription) {
         pendingRemoteIceCandidates.push(candidate);
         console.error('[WebRTC] Buffering ICE candidate (remoteDesc not ready). Total buffered:', pendingRemoteIceCandidates.length);
@@ -550,7 +625,7 @@ function initSocket() {
 // ======================================================
 
 function cleanup() {
-  console.error('[NodeHelper] Cleaning up...');
+  console.error('[NodeHelper] ===== CLEANING UP =====');
   
   stopScreenCapture();
   pendingRemoteIceCandidates = [];
@@ -583,8 +658,6 @@ process.on('SIGTERM', () => {
 
 async function main() {
   try {
-    // Both roles start by connecting to the socket.
-    // The role-specific logic (offer vs wait) is handled inside socket 'connect' event.
     initSocket();
   } catch (err) {
     console.error('[NodeHelper] Fatal error:', err);
