@@ -1,20 +1,27 @@
 /**
- * useRoomClient - FIXED WebRTC + Socket.IO hook for multi-user video conferencing
- * Properly handles peer connections, audio/video streams, and signaling
+ * useRoomClient - FIXED VERSION WITH PROPER ICE SERVER FETCHING
+ * This version ensures TURN servers are loaded before creating peer connections
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { io } from 'socket.io-client';
 
-const ICE_SERVERS = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-  ],
-};
+const DEFAULT_ICE_SERVERS = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  {
+    urls: 'turn:openrelay.metered.ca:443',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+];
 
 export function useRoomClient(roomId, userId, userName, isHost = false, onLeave = null) {
-  // State
   const [localStream, setLocalStream] = useState(null);
   const [localScreenStream, setLocalScreenStream] = useState(null);
   const [participants, setParticipants] = useState([]);
@@ -25,7 +32,7 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
   const [screenShareStream, setScreenShareStream] = useState(null);
   const [activeSpeakerId, setActiveSpeakerId] = useState(null);
   const [meetingEnded, setMeetingEnded] = useState(false);
-  const [meetingEndedBy, setMeetingEndedBy] = useState(null); // Store who ended the meeting
+  const [meetingEndedBy, setMeetingEndedBy] = useState(null);
   const [chatMessages, setChatMessages] = useState([]);
   const [hostMicLocked, setHostMicLocked] = useState(false);
   const [hostCameraLocked, setHostCameraLocked] = useState(false);
@@ -33,26 +40,78 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
   const [reactions, setReactions] = useState([]);
   const [hostNotice, setHostNotice] = useState(null);
 
-  // Refs
   const socketRef = useRef(null);
-  const peerConnectionsRef = useRef(new Map()); // Map<userId, RTCPeerConnection>
-  const remoteStreamsRef = useRef(new Map()); // Map<userId, { videoStream, audioStream }>
+  const peerConnectionsRef = useRef(new Map());
+  const remoteStreamsRef = useRef(new Map());
   const localStreamRef = useRef(null);
   const localScreenStreamRef = useRef(null);
   const screenShareUserIdRef = useRef(null);
   const audioContextRef = useRef(null);
   const audioAnalyserRef = useRef(null);
   const isInitializedRef = useRef(false);
-  const signalingStatesRef = useRef(new Map()); // Map<userId, 'stable' | 'have-local-offer' | 'have-remote-offer' | 'have-local-pranswer' | 'have-remote-pranswer' | 'closed'>
-  const pendingOffersRef = useRef(new Set()); // Set<userId> - Track users we're currently creating offers for
-  const meetingEndedRef = useRef(false); // Flag to prevent reconnection after meeting ends
+  const signalingStatesRef = useRef(new Map());
+  const pendingOffersRef = useRef(new Set());
+  const meetingEndedRef = useRef(false);
+  const connectionRetryCountRef = useRef(new Map());
+  
+  // Store ICE servers in a ref so it's available synchronously
+  const iceServersRef = useRef(null);
+  const iceServersFetchedRef = useRef(false);
 
-  // Leave room - defined early so it can be used by other functions
+  // Fetch ICE servers immediately when hook is called
+  useEffect(() => {
+    const fetchIceServers = async () => {
+      try {
+        const token = localStorage.getItem('token') || localStorage.getItem('vd_auth_token');
+        const apiUrl = import.meta.env.VITE_API_URL || 'https://anydesk.onrender.com';
+        
+        console.log('🔍 [ICE] Fetching ICE servers from backend...');
+        console.log('🔍 [ICE] API URL:', apiUrl);
+        console.log('🔍 [ICE] Has token:', !!token);
+        
+        const response = await fetch(`${apiUrl}/api/remote/turn-token`, {
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+        });
+        
+        console.log('🔍 [ICE] Response status:', response.status);
+        
+        if (response.ok) {
+          const data = await response.json();
+          console.log('🔍 [ICE] Response data:', data);
+          
+          if (data.iceServers && data.iceServers.length > 0) {
+            console.log('✅ [ICE] Fetched', data.iceServers.length, 'ICE servers from backend');
+            console.log('✅ [ICE] Servers:', JSON.stringify(data.iceServers, null, 2));
+            iceServersRef.current = data.iceServers;
+            iceServersFetchedRef.current = true;
+            return;
+          } else {
+            console.warn('⚠️ [ICE] Backend returned empty iceServers array');
+          }
+        } else {
+          console.warn('⚠️ [ICE] Backend fetch failed with status:', response.status);
+          const text = await response.text();
+          console.warn('⚠️ [ICE] Response body:', text);
+        }
+        
+        console.warn('⚠️ [ICE] Using default TURN servers as fallback');
+        iceServersRef.current = DEFAULT_ICE_SERVERS;
+        iceServersFetchedRef.current = true;
+      } catch (error) {
+        console.error('❌ [ICE] Error fetching ICE servers:', error);
+        console.error('❌ [ICE] Error details:', error.message, error.stack);
+        console.warn('⚠️ [ICE] Using default TURN servers as fallback');
+        iceServersRef.current = DEFAULT_ICE_SERVERS;
+        iceServersFetchedRef.current = true;
+      }
+    };
+    
+    fetchIceServers();
+  }, []);
+
   const leaveRoom = useCallback(() => {
-    // Mark meeting as ended to prevent reconnection
     meetingEndedRef.current = true;
 
-    // Stop all tracks
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => track.stop());
     }
@@ -60,22 +119,19 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
       localScreenStreamRef.current.getTracks().forEach((track) => track.stop());
     }
 
-    // Close all peer connections
     peerConnectionsRef.current.forEach((pc) => pc.close());
     peerConnectionsRef.current.clear();
 
-    // Clean up remote streams
     remoteStreamsRef.current.forEach((streams) => {
       streams.videoStream.getTracks().forEach((t) => t.stop());
       streams.audioStream.getTracks().forEach((t) => t.stop());
     });
     remoteStreamsRef.current.clear();
 
-    // Clear signaling states and pending offers
     signalingStatesRef.current.clear();
     pendingOffersRef.current.clear();
+    connectionRetryCountRef.current.clear();
 
-    // Disconnect socket and prevent auto-reconnect
     if (socketRef.current) {
       socketRef.current.removeAllListeners();
       socketRef.current.disconnect();
@@ -89,21 +145,14 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
     setIsScreenSharing(false);
   }, []);
 
-  // Handle meeting ended by host
   const handleMeetingEnded = useCallback(({ roomId: endedRoomId, endedBy, endedByName, message }) => {
     console.log(`Meeting ended by host ${endedByName || endedBy} in room ${endedRoomId}`);
-    console.log('All participants will be notified and redirected...');
     
-    // Store who ended the meeting for display
     setMeetingEndedBy(endedByName || 'Host');
-    
-    // Set meeting ended state to show message
     setMeetingEnded(true);
     
-    // Leave room and cleanup
     leaveRoom();
     
-    // Call onLeave after showing message (2 seconds to ensure all participants see it)
     if (onLeave) {
       setTimeout(() => {
         onLeave();
@@ -111,24 +160,31 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
     }
   }, [leaveRoom, onLeave]);
 
-  // Create peer connection for a specific user
   const createPeerConnection = useCallback(
     (targetUserId) => {
-      // Don't create connection if meeting has ended
       if (meetingEndedRef.current) {
         return null;
       }
 
-      // Don't create connection to self
       if (targetUserId === userId) return null;
 
-      // Check if connection already exists and is not closed
+      // CRITICAL: Use the ref instead of state
+      const iceServers = iceServersRef.current;
+      
+      if (!iceServers) {
+        console.error('❌ [PEER] ICE servers not loaded yet!');
+        console.error('❌ [PEER] iceServersFetchedRef.current:', iceServersFetchedRef.current);
+        console.error('❌ [PEER] This should not happen - ICE servers should be fetched by now');
+        // Use default as emergency fallback
+        iceServersRef.current = DEFAULT_ICE_SERVERS;
+        return null;
+      }
+
       const existingPc = peerConnectionsRef.current.get(targetUserId);
       if (existingPc && existingPc.signalingState !== 'closed' && existingPc.connectionState !== 'closed') {
         return existingPc;
       }
 
-      // Clean up old connection if it exists
       if (existingPc) {
         existingPc.close();
         peerConnectionsRef.current.delete(targetUserId);
@@ -137,10 +193,19 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
         pendingOffersRef.current.delete(targetUserId);
       }
 
-      const pc = new RTCPeerConnection(ICE_SERVERS);
+      console.log(`🔧 [PEER] Creating peer connection to ${targetUserId} with ${iceServers.length} ICE servers`);
+      console.log(`🔧 [PEER] ICE servers:`, iceServers.map(s => ({ 
+        urls: s.urls, 
+        hasCredentials: !!(s.username && s.credential) 
+      })));
+
+      const pc = new RTCPeerConnection({
+        iceServers,
+        iceCandidatePoolSize: 10,
+      });
+      
       signalingStatesRef.current.set(targetUserId, 'stable');
 
-      // Add ALL local tracks to this peer connection
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach((track) => {
           if (track.enabled) {
@@ -149,19 +214,16 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
         });
       }
 
-      // Add screen share track if active
       if (localScreenStreamRef.current) {
         localScreenStreamRef.current.getTracks().forEach((track) => {
           pc.addTrack(track, localScreenStreamRef.current);
         });
       }
 
-      // Handle remote tracks - FIXED: Create separate streams for video and audio
       pc.ontrack = (event) => {
         const track = event.track;
         const stream = event.streams[0];
 
-        // Get or create remote streams for this user
         let remoteStreams = remoteStreamsRef.current.get(targetUserId);
         if (!remoteStreams) {
           remoteStreams = {
@@ -171,9 +233,7 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
           remoteStreamsRef.current.set(targetUserId, remoteStreams);
         }
 
-        // Add track to appropriate stream
         if (track.kind === 'video') {
-          // Detect screen share: prefer explicit screenShareUserIdRef, fall back to displaySurface when available
           const settings = track.getSettings ? track.getSettings() : {};
           const isScreenShareTrack =
             screenShareUserIdRef.current === targetUserId ||
@@ -182,21 +242,18 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
             settings.displaySurface === 'browser';
 
           if (isScreenShareTrack) {
-            // Use the full remote stream when available so screen audio is included
             const screenStream = stream || new MediaStream([track]);
             setScreenShareStream(screenStream);
             setScreenShareUserId(targetUserId);
             screenShareUserIdRef.current = targetUserId;
             setIsScreenSharing(true);
           } else {
-            // Regular camera video track
             remoteStreams.videoStream.addTrack(track);
           }
         } else if (track.kind === 'audio') {
           remoteStreams.audioStream.addTrack(track);
         }
 
-        // Update participant with streams
         setParticipants((prev) => {
           return prev.map((p) => {
             if (p.id === targetUserId) {
@@ -211,29 +268,65 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
         });
       };
 
-      // Handle ICE candidates
       pc.onicecandidate = (event) => {
-        if (event.candidate && socketRef.current) {
-          socketRef.current.emit('ice-candidate', {
-            roomId,
-            to: targetUserId,
-            candidate: event.candidate,
-          });
+        if (event.candidate) {
+          const parts = event.candidate.candidate.split(' ');
+          const type = parts[7];
+          console.log(`📡 [ICE] Candidate [${type}] for ${targetUserId}:`, event.candidate.candidate);
+          
+          if (type === 'relay') {
+            console.log('✅ [ICE] TURN RELAY CANDIDATE GENERATED - Cross-network will work!');
+          } else if (type === 'srflx') {
+            console.log('✅ [ICE] STUN reflexive candidate generated');
+          } else if (type === 'host') {
+            console.log('📡 [ICE] Host candidate (local network)');
+          }
+          
+          if (socketRef.current) {
+            socketRef.current.emit('ice-candidate', {
+              roomId,
+              to: targetUserId,
+              candidate: event.candidate,
+            });
+          }
+        } else {
+          console.log(`✅ [ICE] ICE gathering complete for ${targetUserId}`);
         }
       };
 
-      // Handle signaling state changes
+      pc.onicegatheringstatechange = () => {
+        console.log(`🔍 [ICE] ICE gathering state [${targetUserId}]: ${pc.iceGatheringState}`);
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        console.log(`🔌 [ICE] ICE connection state [${targetUserId}]: ${pc.iceConnectionState}`);
+        
+        if (pc.iceConnectionState === 'connected') {
+          console.log(`✅ [ICE] ICE CONNECTED to ${targetUserId}!`);
+          connectionRetryCountRef.current.set(targetUserId, 0);
+        }
+        
+        if (pc.iceConnectionState === 'failed') {
+          console.error(`❌ [ICE] ICE connection FAILED for ${targetUserId}`);
+          console.error(`❌ [ICE] Attempting ICE restart...`);
+          pc.restartIce();
+        }
+        
+        if (pc.iceConnectionState === 'checking') {
+          console.log(`🔄 [ICE] Checking connectivity to ${targetUserId}...`);
+        }
+      };
+
       pc.onsignalingstatechange = () => {
         const state = pc.signalingState;
         signalingStatesRef.current.set(targetUserId, state);
-        console.log(`Signaling state for ${targetUserId}: ${state}`);
+        console.log(`📞 [SIGNAL] Signaling state for ${targetUserId}: ${state}`);
         
         if (state === 'stable') {
           pendingOffersRef.current.delete(targetUserId);
         }
         
         if (state === 'closed') {
-          // Clean up on close
           const streams = remoteStreamsRef.current.get(targetUserId);
           if (streams) {
             streams.videoStream.getTracks().forEach((t) => t.stop());
@@ -245,17 +338,58 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
         }
       };
 
-      // Handle connection state
       pc.onconnectionstatechange = () => {
-        console.log(
-          `Connection to ${targetUserId}: ${pc.connectionState}`
-        );
-        if (
-          pc.connectionState === 'disconnected' ||
-          pc.connectionState === 'failed' ||
-          pc.connectionState === 'closed'
-        ) {
-          // Clean up on disconnect
+        console.log(`🌐 [PEER] Connection state [${targetUserId}]: ${pc.connectionState}`);
+        
+        if (pc.connectionState === 'connected') {
+          console.log(`✅✅✅ [PEER] SUCCESSFULLY CONNECTED to ${targetUserId}!`);
+          connectionRetryCountRef.current.set(targetUserId, 0);
+        }
+        
+        if (pc.connectionState === 'failed') {
+          console.error(`❌ [PEER] Connection FAILED to ${targetUserId}`);
+          const retryCount = connectionRetryCountRef.current.get(targetUserId) || 0;
+          
+          if (retryCount < 3 && !meetingEndedRef.current) {
+            console.warn(`⚠️ [PEER] Retrying connection (${retryCount + 1}/3)...`);
+            connectionRetryCountRef.current.set(targetUserId, retryCount + 1);
+            
+            pc.close();
+            peerConnectionsRef.current.delete(targetUserId);
+            remoteStreamsRef.current.delete(targetUserId);
+            signalingStatesRef.current.delete(targetUserId);
+            pendingOffersRef.current.delete(targetUserId);
+            
+            setTimeout(() => {
+              if (!meetingEndedRef.current && socketRef.current && iceServersRef.current) {
+                console.log(`🔄 [PEER] Creating new connection attempt to ${targetUserId}...`);
+                const newPc = createPeerConnection(targetUserId);
+                if (newPc && newPc.signalingState === 'stable') {
+                  pendingOffersRef.current.add(targetUserId);
+                  newPc.createOffer()
+                    .then(offer => newPc.setLocalDescription(offer))
+                    .then(() => {
+                      socketRef.current.emit('offer', {
+                        roomId,
+                        to: targetUserId,
+                        offer: newPc.localDescription,
+                      });
+                    })
+                    .catch(err => {
+                      console.error('❌ [PEER] Retry offer failed:', err);
+                      pendingOffersRef.current.delete(targetUserId);
+                    });
+                }
+              }
+            }, 2000 * (retryCount + 1));
+          } else {
+            console.error(`❌❌❌ [PEER] Connection PERMANENTLY FAILED after ${retryCount} retries`);
+            console.error(`❌ [PEER] Possible reasons:`);
+            console.error(`   1. Both users behind symmetric NATs`);
+            console.error(`   2. TURN server not reachable`);
+            console.error(`   3. Firewall blocking all WebRTC traffic`);
+          }
+          
           const streams = remoteStreamsRef.current.get(targetUserId);
           if (streams) {
             streams.videoStream.getTracks().forEach((t) => t.stop());
@@ -264,6 +398,14 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
           remoteStreamsRef.current.delete(targetUserId);
           signalingStatesRef.current.delete(targetUserId);
           pendingOffersRef.current.delete(targetUserId);
+        }
+        
+        if (pc.connectionState === 'connecting') {
+          console.log(`🔄 [PEER] Connecting to ${targetUserId}...`);
+        }
+        
+        if (pc.connectionState === 'disconnected') {
+          console.warn(`⚠️ [PEER] Disconnected from ${targetUserId}`);
         }
       };
 
@@ -273,7 +415,6 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
     [userId, roomId]
   );
 
-  // Initialize local media stream
   const initializeLocalStream = useCallback(
     async (constraints = {}) => {
       try {
@@ -283,13 +424,10 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
           ...constraints,
         };
 
-        const stream = await navigator.mediaDevices.getUserMedia(
-          defaultConstraints
-        );
+        const stream = await navigator.mediaDevices.getUserMedia(defaultConstraints);
         localStreamRef.current = stream;
         setLocalStream(stream);
 
-        // Add local participant
         setParticipants((prev) => {
           const existing = prev.find((p) => p.id === userId);
           if (existing) {
@@ -320,14 +458,10 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
           ];
         });
 
-        // Add tracks to ALL existing peer connections
         peerConnectionsRef.current.forEach((pc, peerUserId) => {
           stream.getTracks().forEach((track) => {
             if (track.enabled) {
-              // Check if track already added
-              const sender = pc
-                .getSenders()
-                .find((s) => s.track && s.track.kind === track.kind);
+              const sender = pc.getSenders().find((s) => s.track && s.track.kind === track.kind);
               if (sender) {
                 sender.replaceTrack(track);
               } else {
@@ -337,19 +471,12 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
           });
         });
 
-        // Initialize audio context for active speaker detection
         if (stream.getAudioTracks().length > 0) {
-          audioContextRef.current = new (window.AudioContext ||
-            window.webkitAudioContext)();
-          audioAnalyserRef.current =
-            audioContextRef.current.createAnalyser();
-          const source = audioContextRef.current.createMediaStreamSource(
-            stream
-          );
+          audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
+          audioAnalyserRef.current = audioContextRef.current.createAnalyser();
+          const source = audioContextRef.current.createMediaStreamSource(stream);
           source.connect(audioAnalyserRef.current);
           audioAnalyserRef.current.fftSize = 256;
-
-          // Start active speaker detection
           detectActiveSpeaker();
         }
 
@@ -363,13 +490,10 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
     [userId, userName, isAudioEnabled, isVideoEnabled]
   );
 
-  // Detect active speaker
   const detectActiveSpeaker = useCallback(() => {
     if (!audioAnalyserRef.current) return;
 
-    const dataArray = new Uint8Array(
-      audioAnalyserRef.current.frequencyBinCount
-    );
+    const dataArray = new Uint8Array(audioAnalyserRef.current.frequencyBinCount);
     const checkAudio = () => {
       if (!audioAnalyserRef.current) return;
       audioAnalyserRef.current.getByteFrequencyData(dataArray);
@@ -384,19 +508,33 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
     checkAudio();
   }, [userId]);
 
-  // Handle room users list (when joining, get existing users)
   const handleRoomUsers = useCallback(
     async (users) => {
-      // Don't process if meeting has ended
       if (meetingEndedRef.current) {
         return;
       }
 
-      console.log('Room users:', users);
-      // Create peer connections for all existing users
+      console.log('[ROOM] Room users:', users);
+      
+      // Wait for ICE servers if not loaded yet
+      if (!iceServersRef.current && !iceServersFetchedRef.current) {
+        console.warn('[ROOM] ICE servers not loaded yet, waiting...');
+        // Wait up to 5 seconds for ICE servers
+        for (let i = 0; i < 50; i++) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+          if (iceServersRef.current) {
+            console.log('[ROOM] ICE servers loaded, proceeding...');
+            break;
+          }
+        }
+        if (!iceServersRef.current) {
+          console.error('[ROOM] ICE servers still not loaded after 5s, using defaults');
+          iceServersRef.current = DEFAULT_ICE_SERVERS;
+        }
+      }
+      
       for (const user of users) {
         if (user.userId !== userId) {
-          // Add to participants list
           setParticipants((prev) => {
             if (prev.find((p) => p.id === user.userId)) return prev;
             return [
@@ -414,11 +552,9 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
             ];
           });
 
-          // Create peer connection and send offer
-          if (isInitializedRef.current && localStreamRef.current) {
-            // Check if we're already creating an offer for this user
+          if (isInitializedRef.current && localStreamRef.current && iceServersRef.current) {
             if (pendingOffersRef.current.has(user.userId)) {
-              console.log(`Already creating offer for ${user.userId}, skipping...`);
+              console.log(`[ROOM] Already creating offer for ${user.userId}, skipping...`);
               continue;
             }
 
@@ -437,7 +573,7 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
                   });
                 }
               } catch (error) {
-                console.error(`Error creating offer for ${user.userId}:`, error);
+                console.error(`[ROOM] Error creating offer for ${user.userId}:`, error);
                 pendingOffersRef.current.delete(user.userId);
               }
             }
@@ -448,19 +584,16 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
     [userId, roomId, createPeerConnection]
   );
 
-  // Handle user joined
   const handleUserJoined = useCallback(
     async ({ userId: newUserId, userName: newUserName }) => {
-      // Don't process if meeting has ended
       if (meetingEndedRef.current) {
         return;
       }
 
       if (newUserId === userId) return;
 
-      console.log(`New user joined: ${newUserName} (${newUserId})`);
+      console.log(`[ROOM] New user joined: ${newUserName} (${newUserId})`);
 
-      // Add to participants list
       setParticipants((prev) => {
         if (prev.find((p) => p.id === newUserId)) return prev;
         return [
@@ -479,43 +612,13 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
       });
 
       return;
-
-      // Create peer connection for new user
-      if (isInitializedRef.current && localStreamRef.current) {
-        // Check if we're already creating an offer for this user
-        if (pendingOffersRef.current.has(newUserId)) {
-          console.log(`Already creating offer for ${newUserId}, skipping...`);
-          return;
-        }
-
-        const pc = createPeerConnection(newUserId);
-        if (pc && pc.signalingState === 'stable') {
-          pendingOffersRef.current.add(newUserId);
-          try {
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-
-            if (socketRef.current) {
-              socketRef.current.emit('offer', {
-                roomId,
-                to: newUserId,
-                offer,
-              });
-            }
-          } catch (error) {
-            console.error(`Error creating offer for ${newUserId}:`, error);
-            pendingOffersRef.current.delete(newUserId);
-          }
-        }
-      }
     },
-    [userId, roomId, createPeerConnection]
+    [userId]
   );
 
-  // Handle user left
   const handleUserLeft = useCallback(
     ({ userId: leftUserId }) => {
-      console.log(`User left: ${leftUserId}`);
+      console.log(`[ROOM] User left: ${leftUserId}`);
 
       const pc = peerConnectionsRef.current.get(leftUserId);
       if (pc) {
@@ -523,7 +626,6 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
         peerConnectionsRef.current.delete(leftUserId);
       }
 
-      // Clean up remote streams
       const streams = remoteStreamsRef.current.get(leftUserId);
       if (streams) {
         streams.videoStream.getTracks().forEach((t) => t.stop());
@@ -543,7 +645,6 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
     [screenShareUserId]
   );
 
-  // Helper: renegotiate with a specific peer after tracks change
   const renegotiateWithPeer = useCallback(
     async (targetUserId) => {
       const pc = peerConnectionsRef.current.get(targetUserId);
@@ -552,16 +653,12 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
       if (!socketRef.current) return;
 
       if (pc.signalingState !== 'stable') {
-        console.log(
-          `Skipping renegotiation with ${targetUserId} - signalingState=${pc.signalingState}`
-        );
+        console.log(`Skipping renegotiation with ${targetUserId} - signalingState=${pc.signalingState}`);
         return;
       }
 
       if (pendingOffersRef.current.has(targetUserId)) {
-        console.log(
-          `Renegotiation already in progress for ${targetUserId}, skipping`
-        );
+        console.log(`Renegotiation already in progress for ${targetUserId}, skipping`);
         return;
       }
 
@@ -583,53 +680,56 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
     [roomId]
   );
 
-  // Helper: renegotiate with all connected peers
   const renegotiateWithAllPeers = useCallback(async () => {
     const peerIds = Array.from(peerConnectionsRef.current.keys());
     for (const peerId of peerIds) {
-      // Run sequentially to reduce glare risk
-      // eslint-disable-next-line no-await-in-loop
       await renegotiateWithPeer(peerId);
     }
   }, [renegotiateWithPeer]);
 
-  // Handle offer
   const handleOffer = useCallback(
     async ({ from, offer }) => {
-      // Don't process if meeting has ended
       if (meetingEndedRef.current) {
         return;
       }
 
-      console.log(`Received offer from ${from}`);
+      console.log(`[SIGNAL] Received offer from ${from}`);
+      
+      // Wait for ICE servers if not loaded yet
+      if (!iceServersRef.current) {
+        console.warn('[SIGNAL] ICE servers not loaded, waiting...');
+        for (let i = 0; i < 50; i++) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+          if (iceServersRef.current) break;
+        }
+        if (!iceServersRef.current) {
+          console.error('[SIGNAL] ICE servers not loaded, using defaults');
+          iceServersRef.current = DEFAULT_ICE_SERVERS;
+        }
+      }
 
       const pc = createPeerConnection(from);
       if (!pc) return;
 
-      // Check if we're already processing an offer/answer for this peer
       const currentState = pc.signalingState;
       if (currentState !== 'stable' && currentState !== 'have-local-offer') {
-        console.warn(`Ignoring offer from ${from} - connection in ${currentState} state`);
+        console.warn(`[SIGNAL] Ignoring offer from ${from} - connection in ${currentState} state`);
         return;
       }
 
       try {
-        // If we have a local offer, we need to rollback or handle it
         if (currentState === 'have-local-offer') {
-          // We're in the middle of creating an offer, rollback first
-          console.log(`Rolling back local offer for ${from} to handle remote offer`);
+          console.log(`[SIGNAL] Rolling back local offer for ${from} to handle remote offer`);
           try {
             await pc.setLocalDescription({ type: 'rollback' });
           } catch (rollbackError) {
-            // Rollback might not be supported or might fail, close and recreate
-            console.log(`Rollback failed, recreating connection to ${from}`);
+            console.log(`[SIGNAL] Rollback failed, recreating connection to ${from}`);
             pc.close();
             peerConnectionsRef.current.delete(from);
             remoteStreamsRef.current.delete(from);
             signalingStatesRef.current.delete(from);
             pendingOffersRef.current.delete(from);
             
-            // Recreate connection and try again
             const newPc = createPeerConnection(from);
             if (newPc) {
               await newPc.setRemoteDescription(new RTCSessionDescription(offer));
@@ -660,17 +760,15 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
           });
         }
       } catch (error) {
-        console.error(`Error handling offer from ${from}:`, error);
-        // If error, try to recover by closing and recreating the connection
+        console.error(`[SIGNAL] Error handling offer from ${from}:`, error);
         if (error.name === 'InvalidAccessError' || error.name === 'InvalidStateError') {
-          console.log(`Recovering from error - recreating connection to ${from}`);
+          console.log(`[SIGNAL] Recovering from error - recreating connection to ${from}`);
           pc.close();
           peerConnectionsRef.current.delete(from);
           remoteStreamsRef.current.delete(from);
           signalingStatesRef.current.delete(from);
           pendingOffersRef.current.delete(from);
           
-          // Try to recreate and handle the offer again
           try {
             const newPc = createPeerConnection(from);
             if (newPc) {
@@ -687,7 +785,7 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
               }
             }
           } catch (retryError) {
-            console.error(`Failed to recover connection to ${from}:`, retryError);
+            console.error(`[SIGNAL] Failed to recover connection to ${from}:`, retryError);
           }
         }
       }
@@ -695,59 +793,49 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
     [roomId, createPeerConnection]
   );
 
-  // Handle answer
   const handleAnswer = useCallback(async ({ from, answer }) => {
-    // Don't process if meeting has ended
     if (meetingEndedRef.current) {
       return;
     }
 
-    console.log(`Received answer from ${from}`);
+    console.log(`[SIGNAL] Received answer from ${from}`);
 
     const pc = peerConnectionsRef.current.get(from);
     if (!pc) {
-      console.warn(`No peer connection found for ${from}`);
+      console.warn(`[SIGNAL] No peer connection found for ${from}`);
       return;
     }
 
-    // Check if we're in the correct state to set remote answer
     const currentState = pc.signalingState;
     if (currentState !== 'have-local-offer') {
-      console.warn(`Ignoring answer from ${from} - connection in ${currentState} state (expected have-local-offer)`);
+      console.warn(`[SIGNAL] Ignoring answer from ${from} - connection in ${currentState} state`);
       return;
     }
 
     try {
       await pc.setRemoteDescription(new RTCSessionDescription(answer));
     } catch (error) {
-      console.error(`Error handling answer from ${from}:`, error);
-      // If error, try to recover
-      if (error.name === 'InvalidStateError') {
-        console.log(`Recovering from error - connection state: ${pc.signalingState}`);
-      }
+      console.error(`[SIGNAL] Error handling answer from ${from}:`, error);
     }
   }, []);
 
-  // Handle ICE candidate
   const handleIceCandidate = useCallback(async ({ from, candidate }) => {
     const pc = peerConnectionsRef.current.get(from);
     if (pc && candidate) {
       try {
         await pc.addIceCandidate(new RTCIceCandidate(candidate));
       } catch (error) {
-        console.error('Error adding ICE candidate:', error);
+        console.error('[ICE] Error adding ICE candidate:', error);
       }
     }
   }, []);
 
-  // Handle screen share started
   const handleScreenShareStarted = useCallback(({ userId: sharerUserId }) => {
     setScreenShareUserId(sharerUserId);
     setIsScreenSharing(true);
     screenShareUserIdRef.current = sharerUserId;
   }, []);
 
-  // Handle screen share stopped
   const handleScreenShareStopped = useCallback(() => {
     setScreenShareStream(null);
     setScreenShareUserId(null);
@@ -755,7 +843,6 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
     screenShareUserIdRef.current = null;
   }, []);
 
-  // Handle audio mute
   const handleAudioMute = useCallback(({ userId: mutedUserId }) => {
     setParticipants((prev) =>
       prev.map((p) =>
@@ -764,7 +851,6 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
     );
   }, []);
 
-  // Handle in-meeting chat message
   const handleMeetingChatMessage = useCallback(
     ({ roomId: msgRoomId, userId: senderId, userName: senderName, text, ts }) => {
       if (!msgRoomId || msgRoomId !== roomId) return;
@@ -834,7 +920,6 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
     [roomId]
   );
 
-  // Handle audio unmute
   const handleAudioUnmute = useCallback(({ userId: unmutedUserId }) => {
     setParticipants((prev) =>
       prev.map((p) =>
@@ -843,7 +928,6 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
     );
   }, []);
 
-  // Handle video mute
   const handleVideoMute = useCallback(({ userId: mutedUserId }) => {
     setParticipants((prev) =>
       prev.map((p) =>
@@ -852,7 +936,6 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
     );
   }, []);
 
-  // Handle video unmute
   const handleVideoUnmute = useCallback(({ userId: unmutedUserId }) => {
     setParticipants((prev) =>
       prev.map((p) =>
@@ -970,8 +1053,6 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
     [roomId]
   );
 
-
-  // Toggle audio
   const toggleAudio = useCallback(
     async (enabled) => {
       setIsAudioEnabled(enabled);
@@ -981,9 +1062,7 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
         : [];
 
       if (enabled) {
-        // Enable or create audio track
         if (!hasStream || existingAudioTracks.length === 0) {
-          // No audio yet: acquire a new track
           try {
             const stream = await navigator.mediaDevices.getUserMedia({
               audio: true,
@@ -998,7 +1077,6 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
                 setLocalStream(stream);
               }
 
-              // Attach audio track to all peer connections
               peerConnectionsRef.current.forEach((pc) => {
                 const sender = pc
                   .getSenders()
@@ -1016,7 +1094,6 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
             console.error('Error getting audio track:', error);
           }
         } else {
-          // Re-enable existing tracks and ensure they are attached
           existingAudioTracks.forEach((track) => {
             track.enabled = true;
           });
@@ -1036,7 +1113,6 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
           await renegotiateWithAllPeers();
         }
       } else if (hasStream) {
-        // Disable existing audio tracks without detaching senders
         existingAudioTracks.forEach((track) => {
           track.enabled = false;
         });
@@ -1044,14 +1120,12 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
         await renegotiateWithAllPeers();
       }
 
-      // Update participant state
       setParticipants((prev) =>
         prev.map((p) =>
           p.id === userId ? { ...p, isAudioEnabled: enabled } : p
         )
       );
 
-      // Broadcast to others
       if (socketRef.current) {
         socketRef.current.emit(enabled ? 'audio-unmute' : 'audio-mute', {
           roomId,
@@ -1059,10 +1133,9 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
         });
       }
     },
-    [roomId, userId]
+    [roomId, userId, renegotiateWithAllPeers]
   );
 
-  // Toggle video
   const toggleVideo = useCallback(
     async (enabled) => {
       setIsVideoEnabled(enabled);
@@ -1072,7 +1145,6 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
         : [];
 
       if (enabled) {
-        // Enable or create camera video track
         if (!hasStream || existingVideoTracks.length === 0) {
           try {
             const stream = await navigator.mediaDevices.getUserMedia({
@@ -1088,7 +1160,6 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
                 setLocalStream(stream);
               }
 
-              // Attach camera video track in all peer connections
               peerConnectionsRef.current.forEach((pc) => {
                 const sender = pc
                   .getSenders()
@@ -1110,7 +1181,6 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
             console.error('Error getting video track:', error);
           }
         } else {
-          // Re-enable existing camera video tracks and ensure they are attached
           existingVideoTracks.forEach((track) => {
             track.enabled = true;
           });
@@ -1132,20 +1202,17 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
           });
         }
       } else if (hasStream) {
-        // Disable existing camera video tracks without detaching senders
         existingVideoTracks.forEach((track) => {
           track.enabled = false;
         });
       }
 
-      // Update participant state
       setParticipants((prev) =>
         prev.map((p) =>
           p.id === userId ? { ...p, isVideoEnabled: enabled } : p
         )
       );
 
-      // Broadcast to others
       if (socketRef.current) {
         socketRef.current.emit(enabled ? 'video-unmute' : 'video-mute', {
           roomId,
@@ -1153,13 +1220,11 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
         });
       }
     },
-    [roomId, userId]
+    [roomId, userId, renegotiateWithAllPeers]
   );
 
-  // Start screen share
   const startScreenShare = useCallback(async () => {
     try {
-      // Check if someone else is already sharing
       if (screenShareUserId && screenShareUserId !== userId) {
         alert('Screen share is already in progress by another participant.');
         return;
@@ -1177,7 +1242,6 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
       setScreenShareUserId(userId);
       screenShareUserIdRef.current = userId;
 
-      // Broadcast screen share started before tracks so receivers can classify correctly
       if (socketRef.current) {
         socketRef.current.emit('screen-share-started', {
           roomId,
@@ -1185,14 +1249,12 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
         });
       }
 
-      // Add screen share track to all peer connections
       peerConnectionsRef.current.forEach((pc) => {
         pc.addTrack(videoTrack, stream);
       });
 
       await renegotiateWithAllPeers();
 
-      // Handle screen share end
       videoTrack.onended = () => {
         stopScreenShare();
       };
@@ -1202,9 +1264,8 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
         throw error;
       }
     }
-  }, [roomId, userId, screenShareUserId]);
+  }, [roomId, userId, screenShareUserId, renegotiateWithAllPeers]);
 
-  // Stop screen share
   const stopScreenShare = useCallback(async () => {
     if (localScreenStreamRef.current) {
       localScreenStreamRef.current.getTracks().forEach((track) => track.stop());
@@ -1212,7 +1273,6 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
       setLocalScreenStream(null);
     }
 
-    // Remove screen share tracks from peer connections
     peerConnectionsRef.current.forEach((pc) => {
       const senders = pc.getSenders();
       senders.forEach((sender) => {
@@ -1234,27 +1294,23 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
     setScreenShareStream(null);
     screenShareUserIdRef.current = null;
 
-    // Broadcast screen share stopped
     if (socketRef.current) {
       socketRef.current.emit('screen-share-stopped', {
         roomId,
         userId,
       });
     }
-  }, [roomId, userId]);
+  }, [roomId, userId, renegotiateWithAllPeers]);
 
-  // End meeting (host only) - broadcasts to all participants
   const endMeeting = useCallback(() => {
     if (!isHost) {
       console.warn('Only host can end the meeting');
       return;
     }
 
-    // Mark meeting as ended immediately
     setMeetingEnded(true);
     meetingEndedRef.current = true;
 
-    // Broadcast meeting ended to all participants
     if (socketRef.current) {
       socketRef.current.emit('end-meeting', {
         roomId,
@@ -1262,10 +1318,8 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
       });
     }
 
-    // Leave room locally (host also leaves)
     leaveRoom();
 
-    // Call onLeave for host immediately
     if (onLeave) {
       setTimeout(() => {
         onLeave();
@@ -1273,14 +1327,11 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
     }
   }, [roomId, userId, isHost, leaveRoom, onLeave]);
 
-  // Initialize socket and set up event listeners
   useEffect(() => {
-    // Don't initialize if meeting has ended
     if (meetingEndedRef.current) {
       return;
     }
 
-    // Resolve auth token from localStorage (same pattern as DeskLink/chat sockets)
     let authToken = null;
     if (typeof window !== 'undefined') {
       authToken =
@@ -1289,11 +1340,10 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
     }
 
     if (!authToken) {
-      console.warn('[useRoomClient] no auth token found; meeting socket will not connect');
+      console.warn('[useRoomClient] no auth token found');
       return;
     }
 
-    // Initialize socket connection with JWT auth
     socketRef.current = io(import.meta.env.VITE_SOCKET_URL || 'https://anydesk.onrender.com', {
       auth: { token: authToken },
       transports: ['websocket'],
@@ -1305,16 +1355,13 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
 
     const socket = socketRef.current;
 
-    // Socket connection handlers
     socket.on('connect', () => {
-      // Don't join room if meeting has ended
       if (meetingEndedRef.current) {
         socket.disconnect();
         return;
       }
 
-      console.log('Socket connected:', socket.id);
-      // Join room
+      console.log('[SOCKET] Socket connected:', socket.id);
       socket.emit('user-joined', {
         roomId,
         userId,
@@ -1324,21 +1371,18 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
     });
 
     socket.on('disconnect', () => {
-      console.log('Socket disconnected');
-      // If meeting ended, don't allow reconnection
+      console.log('[SOCKET] Socket disconnected');
       if (meetingEndedRef.current) {
         socket.removeAllListeners();
       }
     });
 
-    // Prevent reconnection if meeting ended
     socket.io.on('reconnect_attempt', () => {
       if (meetingEndedRef.current) {
         socket.io.disconnect();
       }
     });
 
-    // Register all socket event listeners
     socket.on('room-users', handleRoomUsers);
     socket.on('user-joined', handleUserJoined);
     socket.on('user-left', handleUserLeft);
@@ -1362,7 +1406,6 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
     socket.on('reaction', handleReaction);
     socket.on('meeting-ended', handleMeetingEnded);
 
-    // Cleanup on unmount
     return () => {
       socket.off('room-users', handleRoomUsers);
       socket.off('user-joined', handleUserJoined);
@@ -1417,7 +1460,6 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
     handleMeetingEnded,
   ]);
 
-  // Send in-meeting chat message (use same handler as incoming messages)
   const sendChatMessage = useCallback(
     (text) => {
       const trimmed = String(text || '').trim();
@@ -1425,7 +1467,6 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
 
       const ts = Date.now();
 
-      // Locally add the message using the same pipeline as remote messages
       handleMeetingChatMessage({
         roomId,
         userId,
@@ -1542,8 +1583,6 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
         ts: Date.now(),
       };
 
-      // Let the server broadcast the reaction so all participants (including sender)
-      // receive the same event via the 'reaction' listener
       socketRef.current.emit('reaction', payload);
     },
     [roomId, userId, userName]
