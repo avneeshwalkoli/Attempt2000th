@@ -14,10 +14,7 @@ import {
   Users,
   MessageSquare,
   Smile,
-  Share2,
   Settings,
-  Info,
-  MoreVertical,
 } from 'lucide-react';
 import { useMeeting } from './useMeeting.js';
 
@@ -51,8 +48,7 @@ export default function MeetingRoom({
   const [showParticipants, setShowParticipants] = useState(false);
   const [showChat, setShowChat] = useState(false);
   const [showReactions, setShowReactions] = useState(false);
-  const [showMore, setShowMore] = useState(false);
-  const [activeSpeakerId, setActiveSpeakerId] = useState(null);
+    const [activeSpeakerId, setActiveSpeakerId] = useState(null);
 
   const localVideoRef = useRef(null);
   const remoteVideoRefs = useRef(new Map());
@@ -120,11 +116,15 @@ export default function MeetingRoom({
     }
   }, [leaveRoom, onLeave]);
 
+  // When screen sharing, prefer showing the active outbound video (screen) locally,
+  // but ensure remote participants still receive either screen or camera appropriately
+  const localPreviewStream = isScreenSharing ? localStream || externalStream : localStream || externalStream;
+
   const allParticipants = [
     {
       id: 'local',
       name: userName || 'You',
-      stream: localStream || externalStream,
+      stream: localPreviewStream,
       isLocal: true,
       isScreenShare: isScreenSharing,
     },
@@ -305,23 +305,7 @@ export default function MeetingRoom({
               </button>
             )}
 
-            {/* Meeting Info */}
-            <button
-              className="flex items-center justify-center w-12 h-12 rounded-full bg-slate-700 text-white hover:bg-slate-600 transition-all"
-              title="Meeting Info"
-            >
-              <Info className="h-5 w-5" />
-            </button>
-
-            {/* More */}
-            <button
-              onClick={() => setShowMore(!showMore)}
-              className="flex items-center justify-center w-12 h-12 rounded-full bg-slate-700 text-white hover:bg-slate-600 transition-all"
-              title="More"
-            >
-              <MoreVertical className="h-5 w-5" />
-            </button>
-
+            
             {/* End Meeting - Red button */}
             <button
               onClick={handleLeave}

@@ -1230,18 +1230,40 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
         return;
       }
 
-      const stream = await navigator.mediaDevices.getDisplayMedia({
+      // Always capture only video for screen share, and do not add a second track
+      const screen = await navigator.mediaDevices.getDisplayMedia({
         video: true,
-        audio: true,
+        audio: false,
       });
 
-      const videoTrack = stream.getVideoTracks()[0];
-      localScreenStreamRef.current = stream;
-      setLocalScreenStream(stream);
+      const screenVideoTrack = screen.getVideoTracks()[0];
+      if (!screenVideoTrack) return;
+
+      // Keep refs/state for local screen
+      localScreenStreamRef.current = screen;
+      setLocalScreenStream(screen);
       setIsScreenSharing(true);
       setScreenShareUserId(userId);
       screenShareUserIdRef.current = userId;
 
+      // Replace existing camera video sender with screen track
+      peerConnectionsRef.current.forEach((pc) => {
+        const videoSender = pc
+          .getSenders()
+          .find((s) => s.track && s.track.kind === 'video');
+        if (videoSender) {
+          videoSender.replaceTrack(screenVideoTrack);
+        }
+      });
+
+      // Update local preview by swapping the track in the local stream
+      if (localStreamRef.current) {
+        const camTrack = localStreamRef.current.getVideoTracks()[0];
+        // Disable camera track while sharing to avoid multiple active tracks
+        if (camTrack) camTrack.enabled = false;
+      }
+
+      // Notify peers for layout sync
       if (socketRef.current) {
         socketRef.current.emit('screen-share-started', {
           roomId,
@@ -1249,13 +1271,11 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
         });
       }
 
-      peerConnectionsRef.current.forEach((pc) => {
-        pc.addTrack(videoTrack, stream);
-      });
-
+      // Ensure late joiners get correct sender state
       await renegotiateWithAllPeers();
 
-      videoTrack.onended = () => {
+      // Handle manual stop from browser UI
+      screenVideoTrack.onended = () => {
         stopScreenShare();
       };
     } catch (error) {
@@ -1267,25 +1287,26 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
   }, [roomId, userId, screenShareUserId, renegotiateWithAllPeers]);
 
   const stopScreenShare = useCallback(async () => {
+    // Stop screen tracks and clear refs/state
     if (localScreenStreamRef.current) {
       localScreenStreamRef.current.getTracks().forEach((track) => track.stop());
       localScreenStreamRef.current = null;
       setLocalScreenStream(null);
     }
 
+    // Restore the original camera track into the existing sender
+    const cameraTrack = localStreamRef.current?.getVideoTracks()[0] || null;
     peerConnectionsRef.current.forEach((pc) => {
-      const senders = pc.getSenders();
-      senders.forEach((sender) => {
-        if (
-          sender.track &&
-          (sender.track.getSettings().displaySurface === 'screen' ||
-            sender.track.getSettings().displaySurface === 'window' ||
-            sender.track.getSettings().displaySurface === 'browser')
-        ) {
-          pc.removeTrack(sender);
-        }
-      });
+      const videoSender = pc
+        .getSenders()
+        .find((s) => s.track && s.track.kind === 'video');
+      if (videoSender) {
+        videoSender.replaceTrack(cameraTrack);
+      }
     });
+
+    // Re-enable camera track for local preview
+    if (cameraTrack) cameraTrack.enabled = true;
 
     await renegotiateWithAllPeers();
 
