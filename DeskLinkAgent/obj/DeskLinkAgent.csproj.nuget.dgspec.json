@@ -1,31 +1,25 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\yasha\\OneDrive\\Desktop\\90\\lala\\DeskLinkAgent\\DeskLinkAgent.csproj": {}
+    "C:\\Users\\avnee\\OneDrive\\Desktop\\VisionDesk\\anydesk\\DeskLinkAgent\\DeskLinkAgent.csproj": {}
   },
   "projects": {
-    "C:\\Users\\yasha\\OneDrive\\Desktop\\90\\lala\\DeskLinkAgent\\DeskLinkAgent.csproj": {
+    "C:\\Users\\avnee\\OneDrive\\Desktop\\VisionDesk\\anydesk\\DeskLinkAgent\\DeskLinkAgent.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\yasha\\OneDrive\\Desktop\\90\\lala\\DeskLinkAgent\\DeskLinkAgent.csproj",
+        "projectUniqueName": "C:\\Users\\avnee\\OneDrive\\Desktop\\VisionDesk\\anydesk\\DeskLinkAgent\\DeskLinkAgent.csproj",
         "projectName": "DeskLinkAgent",
-        "projectPath": "C:\\Users\\yasha\\OneDrive\\Desktop\\90\\lala\\DeskLinkAgent\\DeskLinkAgent.csproj",
-        "packagesPath": "C:\\Users\\yasha\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\yasha\\OneDrive\\Desktop\\90\\lala\\DeskLinkAgent\\obj\\",
+        "projectPath": "C:\\Users\\avnee\\OneDrive\\Desktop\\VisionDesk\\anydesk\\DeskLinkAgent\\DeskLinkAgent.csproj",
+        "packagesPath": "C:\\Users\\avnee\\.nuget\\packages\\",
+        "outputPath": "C:\\Users\\avnee\\OneDrive\\Desktop\\VisionDesk\\anydesk\\DeskLinkAgent\\obj\\",
         "projectStyle": "PackageReference",
-        "fallbackFolders": [
-          "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
-        ],
         "configFilePaths": [
-          "C:\\Users\\yasha\\AppData\\Roaming\\NuGet\\NuGet.Config",
-          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
-          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
+          "C:\\Users\\avnee\\AppData\\Roaming\\NuGet\\NuGet.Config"
         ],
         "originalTargetFrameworks": [
           "net8.0"
         ],
         "sources": {
-          "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
           "https://api.nuget.org/v3/index.json": {}
         },
         "frameworks": {
@@ -86,6 +80,24 @@
           ],
           "assetTargetFallback": true,
           "warn": true,
+          "downloadDependencies": [
+            {
+              "name": "Microsoft.AspNetCore.App.Ref",
+              "version": "[8.0.18, 8.0.18]"
+            },
+            {
+              "name": "Microsoft.NETCore.App.Host.win-x64",
+              "version": "[8.0.18, 8.0.18]"
+            },
+            {
+              "name": "Microsoft.NETCore.App.Ref",
+              "version": "[8.0.18, 8.0.18]"
+            },
+            {
+              "name": "Microsoft.WindowsDesktop.App.Ref",
+              "version": "[8.0.18, 8.0.18]"
+            }
+          ],
           "frameworkReferences": {
             "Microsoft.NETCore.App": {
               "privateAssets": "all"
