@@ -53,6 +53,8 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
   const pendingOffersRef = useRef(new Set());
   const meetingEndedRef = useRef(false);
   const connectionRetryCountRef = useRef(new Map());
+  // Buffer incoming ICE candidates per peer until we have a remote description
+  const pendingRemoteIceByPeerRef = useRef(new Map()); // Map<userId, RTCIceCandidateInit[]>
   
   // Store ICE servers in a ref so it's available synchronously
   const iceServersRef = useRef(null);
@@ -63,13 +65,16 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
     const fetchIceServers = async () => {
       try {
         const token = localStorage.getItem('token') || localStorage.getItem('vd_auth_token');
-        const apiUrl = import.meta.env.VITE_API_URL || 'https://anydesk.onrender.com';
+        // Use the same API base as DeskLink (local-first), override via VITE_API if needed.
+        // NOTE: VITE_API already includes the `/api` prefix (e.g. http://localhost:5000/api),
+        // so we append only `/remote/turn-token` here to avoid double `/api/api/...` bugs.
+        const apiUrl = import.meta.env.VITE_API || 'http://localhost:5000/api';
         
         console.log('🔍 [ICE] Fetching ICE servers from backend...');
         console.log('🔍 [ICE] API URL:', apiUrl);
         console.log('🔍 [ICE] Has token:', !!token);
         
-        const response = await fetch(`${apiUrl}/api/remote/turn-token`, {
+        const response = await fetch(`${apiUrl}/remote/turn-token`, {
           headers: token ? { 'Authorization': `Bearer ${token}` } : {},
         });
         
@@ -514,7 +519,7 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
         return;
       }
 
-      console.log('[ROOM] Room users:', users);
+      console.log('[ROOM] room-users payload:', users);
       
       // Wait for ICE servers if not loaded yet
       if (!iceServersRef.current && !iceServersFetchedRef.current) {
@@ -548,6 +553,7 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
                 isVideoEnabled: true,
                 isLocal: false,
                 isScreenSharing: false,
+                authUserId: user.authUserId || null,
               },
             ];
           });
@@ -585,14 +591,18 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
   );
 
   const handleUserJoined = useCallback(
-    async ({ userId: newUserId, userName: newUserName }) => {
+    async ({ userId: newUserId, userName: newUserName, authUserId }) => {
       if (meetingEndedRef.current) {
         return;
       }
 
       if (newUserId === userId) return;
 
-      console.log(`[ROOM] New user joined: ${newUserName} (${newUserId})`);
+      console.log('[ROOM] user-joined payload:', {
+        newUserId,
+        newUserName,
+        authUserId,
+      });
 
       setParticipants((prev) => {
         if (prev.find((p) => p.id === newUserId)) return prev;
@@ -607,6 +617,9 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
             isVideoEnabled: true,
             isLocal: false,
             isScreenSharing: false,
+            // authUserId comes from the backend (Mongo User._id as string) so that
+            // in-meeting remote control can target this participant reliably.
+            authUserId: authUserId || null,
           },
         ];
       });
@@ -708,7 +721,7 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
         }
       }
 
-      const pc = createPeerConnection(from);
+      let pc = createPeerConnection(from);
       if (!pc) return;
 
       const currentState = pc.signalingState;
@@ -730,25 +743,27 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
             signalingStatesRef.current.delete(from);
             pendingOffersRef.current.delete(from);
             
-            const newPc = createPeerConnection(from);
-            if (newPc) {
-              await newPc.setRemoteDescription(new RTCSessionDescription(offer));
-              const answer = await newPc.createAnswer();
-              await newPc.setLocalDescription(answer);
-              
-              if (socketRef.current) {
-                socketRef.current.emit('answer', {
-                  roomId,
-                  to: from,
-                  answer,
-                });
-              }
-            }
-            return;
+            pc = createPeerConnection(from);
+            if (!pc) return;
           }
         }
 
         await pc.setRemoteDescription(new RTCSessionDescription(offer));
+
+        // Apply any ICE candidates that arrived before the remote description
+        const buffered = pendingRemoteIceByPeerRef.current.get(from);
+        if (buffered && buffered.length > 0) {
+          console.log('[SIGNAL] Applying buffered ICE candidates for', from);
+          for (const c of buffered) {
+            try {
+              await pc.addIceCandidate(new RTCIceCandidate(c));
+            } catch (err) {
+              console.error('[ICE] Error applying buffered ICE:', err);
+            }
+          }
+          pendingRemoteIceByPeerRef.current.delete(from);
+        }
+
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
 
@@ -773,6 +788,20 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
             const newPc = createPeerConnection(from);
             if (newPc) {
               await newPc.setRemoteDescription(new RTCSessionDescription(offer));
+
+              const buffered = pendingRemoteIceByPeerRef.current.get(from);
+              if (buffered && buffered.length > 0) {
+                console.log('[SIGNAL] Applying buffered ICE candidates for', from);
+                for (const c of buffered) {
+                  try {
+                    await newPc.addIceCandidate(new RTCIceCandidate(c));
+                  } catch (err) {
+                    console.error('[ICE] Error applying buffered ICE:', err);
+                  }
+                }
+                pendingRemoteIceByPeerRef.current.delete(from);
+              }
+
               const answer = await newPc.createAnswer();
               await newPc.setLocalDescription(answer);
               
@@ -814,19 +843,48 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
 
     try {
       await pc.setRemoteDescription(new RTCSessionDescription(answer));
+
+      // Apply any buffered ICE candidates for this peer
+      const buffered = pendingRemoteIceByPeerRef.current.get(from);
+      if (buffered && buffered.length > 0) {
+        console.log('[SIGNAL] Applying buffered ICE candidates for', from);
+        for (const c of buffered) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(c));
+          } catch (err) {
+            console.error('[ICE] Error applying buffered ICE:', err);
+          }
+        }
+        pendingRemoteIceByPeerRef.current.delete(from);
+      }
     } catch (error) {
       console.error(`[SIGNAL] Error handling answer from ${from}:`, error);
     }
   }, []);
 
   const handleIceCandidate = useCallback(async ({ from, candidate }) => {
+    if (!candidate) return;
+
     const pc = peerConnectionsRef.current.get(from);
-    if (pc && candidate) {
-      try {
-        await pc.addIceCandidate(new RTCIceCandidate(candidate));
-      } catch (error) {
-        console.error('[ICE] Error adding ICE candidate:', error);
+    if (!pc || pc.signalingState === 'closed') {
+      return;
+    }
+
+    // If we don't yet have a remote description, buffer this candidate
+    if (!pc.remoteDescription) {
+      let list = pendingRemoteIceByPeerRef.current.get(from);
+      if (!list) {
+        list = [];
+        pendingRemoteIceByPeerRef.current.set(from, list);
       }
+      list.push(candidate);
+      return;
+    }
+
+    try {
+      await pc.addIceCandidate(new RTCIceCandidate(candidate));
+    } catch (error) {
+      console.error('[ICE] Error adding ICE candidate:', error);
     }
   }, []);
 
@@ -1344,7 +1402,8 @@ export function useRoomClient(roomId, userId, userName, isHost = false, onLeave 
       return;
     }
 
-    socketRef.current = io(import.meta.env.VITE_SOCKET_URL || 'https://anydesk.onrender.com', {
+    // Local-first Socket.IO endpoint for meetings; override with VITE_SOCKET_URL if needed.
+    socketRef.current = io(import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000', {
       auth: { token: authToken },
       transports: ['websocket'],
       path: '/socket.io',

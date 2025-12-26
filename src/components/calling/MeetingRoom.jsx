@@ -53,6 +53,7 @@ export default function MeetingRoom({
   const [showReactions, setShowReactions] = useState(false);
   const [showMore, setShowMore] = useState(false);
   const [activeSpeakerId, setActiveSpeakerId] = useState(null);
+const [isAnyDeskActive, setIsAnyDeskActive] = useState(false);
 
   const localVideoRef = useRef(null);
   const remoteVideoRefs = useRef(new Map());
@@ -294,6 +295,19 @@ export default function MeetingRoom({
             >
               <Monitor className="h-5 w-5" />
             </button>
+            {/* AnyDesk / Remote Access */}
+<button
+  onClick={() => {
+    console.log("AnyDesk clicked");
+    setIsAnyDeskActive(true);
+  }}
+  className="flex items-center justify-center w-12 h-12 rounded-full 
+             bg-purple-600 text-white hover:bg-purple-500 transition-all"
+  title="Remote Access"
+>
+  <Share2 className="h-5 w-5" />
+</button>
+
 
             {/* Host Tools (only for host) */}
             {isHost && (

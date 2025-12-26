@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_BASE || 'https://anydesk.onrender.com/api';
+const API_BASE = import.meta.env.VITE_API || 'http://localhost:5000/api';
 
 const parseJSON = async (res) => {
   const data = await res.json().catch(() => ({}));
@@ -41,6 +41,19 @@ export const desklinkApi = {
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify(payload),
+    });
+    return parseJSON(res);
+  },
+
+  // In-meeting remote access: webId-only (toUserId), deviceId resolved server-side
+  async requestMeetingRemote(token, targetUserId) {
+    const res = await fetch(`${API_BASE}/remote/meeting-request`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ toUserId: targetUserId }),
     });
     return parseJSON(res);
   },

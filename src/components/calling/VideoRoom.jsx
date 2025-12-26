@@ -11,10 +11,11 @@ import MeetingGrid from './MeetingGrid.jsx';
 import ControlBar from './ControlBar.jsx';
 import ScreenShareView from './ScreenShareView.jsx';
 import MeetingChatPanel from './MeetingChatPanel.jsx';
+import { MeetingRemoteControlProvider, useMeetingRemoteControl } from './meetingRemoteControlContext.jsx';
+import RemoteVideoArea from '../../modules/desklink/components/RemoteVideoArea.jsx';
+import IncomingRequestModal from '../../modules/desklink/components/IncomingRequestModal.jsx';
 
-const REACTION_EMOJIS = ['👍', '❤️', '😂', '🎉', '😮', '😢', '👏', '🔥', '🙌', '😍', '😊', '🎧'];
-
-export default function VideoRoom({
+function VideoRoomInner({
   roomId,
   userName,
   isHost = false,
@@ -65,6 +66,20 @@ export default function VideoRoom({
     initializeLocalStream,
   } = useRoomClient(roomId, userId, userName, isHost, onLeave);
 
+  const {
+    isPanelOpen: isRemoteControlOpen,
+    togglePanel: toggleRemoteControlPanel,
+    remoteStream: remoteDesktopStream,
+    stats: remoteStats,
+    permissions,
+    sessionConfig,
+    sendControlMessage,
+    requestControlForUser,
+    incomingRequest,
+    acceptIncomingRequest,
+    rejectIncomingRequest,
+  } = useMeetingRemoteControl();
+
   // Initialize local media based on initial audio/video flags
   useEffect(() => {
     const constraints = {
@@ -93,6 +108,35 @@ export default function VideoRoom({
     isScreenSharing,
     screenShareUserId,
   });
+
+  // Debug logs to verify participant and authUserId mapping for remote control
+  React.useEffect(() => {
+    console.log('[RemoteControl] localUserId:', userId);
+    console.log('[RemoteControl] allParticipants (raw):', allParticipants);
+    allParticipants?.forEach((p) => {
+      console.log('[RemoteControl] participant', {
+        meetingUserId: p.id,
+        name: p.name,
+        authUserId: p.authUserId || null,
+      });
+    });
+  }, [allParticipants, userId]);
+
+  // Build controller candidates: all non-local participants, with a best-effort
+  // mapping to a backend user id (authUserId). We do NOT hide the UI when the
+  // mapping is missing; instead we mark those entries as non-actionable so the
+  // developer can see them and understand why the Request button is disabled.
+  const controllerCandidates = React.useMemo(
+    () =>
+      (allParticipants || [])
+        .filter((p) => p.id !== userId)
+        .map((p) => ({
+          ...p,
+          targetUserId: p.authUserId ? String(p.authUserId) : null,
+          hasBackendUser: !!p.authUserId,
+        })),
+    [allParticipants, userId]
+  );
 
   const {
     hasScreenShare,
@@ -172,13 +216,6 @@ export default function VideoRoom({
 
   return (
     <div className="flex h-screen w-screen flex-col bg-[#0F172A] text-white overflow-hidden relative">
-      {hostNotice && (
-        <div className="pointer-events-none absolute top-4 right-4 z-40">
-          <div className="rounded-md bg-slate-900/90 border border-slate-700 px-3 py-2 text-xs text-slate-100 shadow-lg">
-            {hostNotice}
-          </div>
-        </div>
-      )}
 
       {reactions && reactions.length > 0 && (
         <div className="pointer-events-none absolute inset-x-0 bottom-24 flex justify-center z-30 overflow-visible">
@@ -189,6 +226,95 @@ export default function VideoRoom({
           ))}
         </div>
       )}
+
+      {/* Host notice toast (e.g. "Host muted you") */}
+      {hostNotice && (
+        <div className="pointer-events-none absolute top-4 right-4 z-40">
+          <div className="rounded-md bg-slate-900/90 border border-slate-700 px-3 py-2 text-xs text-slate-100 shadow-lg">
+            {hostNotice}
+          </div>
+        </div>
+      )}
+
+      {/* In-Meeting Remote Control Panel (VisionDesk Control Mode) */}
+      {isRemoteControlOpen && (
+        <div className="pointer-events-auto absolute bottom-28 right-6 z-40 w-[420px] max-w-[90vw]">
+          <div className="bg-slate-900/95 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[260px]">
+            <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800">
+              <div className="flex flex-col">
+                <span className="text-xs font-semibold text-slate-100">Remote Control</span>
+                <span className="text-[10px] text-slate-400">In-meeting VisionDesk Control Mode</span>
+              </div>
+              <button
+                type="button"
+                onClick={toggleRemoteControlPanel}
+                className="text-slate-400 hover:text-slate-100 text-xs px-2 py-1 rounded-md hover:bg-slate-800"
+              >
+                Close
+              </button>
+            </div>
+            <div className="flex-1 bg-slate-950/80 p-2">
+              {remoteDesktopStream && sessionConfig ? (
+                <RemoteVideoArea
+                  stream={remoteDesktopStream}
+                  onControlMessage={sendControlMessage}
+                  sessionId={sessionConfig?.sessionId || ''}
+                  token={sessionConfig?.sessionToken || ''}
+                  permissions={permissions}
+                  stats={remoteStats}
+                />
+              ) : (
+                <div className="flex flex-col h-full text-xs text-slate-300">
+                  <div className="mb-2 text-[11px] font-medium text-slate-200">Request control from someone in this meeting</div>
+                  <div className="flex-1 overflow-auto rounded-lg bg-slate-900/70 border border-slate-800 p-2 space-y-1">
+                    {controllerCandidates.length === 0 ? (
+                      <div className="text-slate-500 text-[11px] text-center py-6">
+                        Remote control unavailable: no participants with a resolved backend userId.
+                      </div>
+                    ) : (
+                      controllerCandidates.map((p) => (
+                        <div
+                          key={p.id}
+                          className="flex items-center justify-between rounded-md bg-slate-800/80 px-2 py-1"
+                        >
+                          <div className="flex flex-col">
+                            <span className="text-[11px] font-medium text-slate-100">{p.name || 'Participant'}</span>
+                            <span className="text-[10px] text-slate-500 break-all">
+                              Backend userId: {p.targetUserId || 'unresolved (no authUserId from server)'}
+                            </span>
+                          </div>
+                          <div className="flex flex-col items-end gap-0.5">
+                            <button
+                              type="button"
+                              disabled={!p.targetUserId}
+                              onClick={() =>
+                                p.targetUserId &&
+                                requestControlForUser({
+                                  targetUserId: p.targetUserId,
+                                  targetName: p.name || 'Participant',
+                                })
+                              }
+                              className="text-[10px] px-2 py-1 rounded-md bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              Request
+                            </button>
+                            {!p.targetUserId && (
+                              <span className="text-[9px] text-amber-400">
+                                Cannot request: backend userId not resolved (check auth/contact link)
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Main Content Area */}
       <div className="flex-1 overflow-hidden flex">
         {isParticipantsOpen && (
@@ -292,6 +418,8 @@ export default function VideoRoom({
         canUseMic={isHost || !hostMicLocked}
         canUseCamera={isHost || !hostCameraLocked}
         isChatDisabled={hostChatDisabled}
+        isRemoteControlOpen={isRemoteControlOpen}
+        onToggleRemoteControl={toggleRemoteControlPanel}
       />
 
       {isReactionsOpen && (
@@ -415,7 +543,23 @@ export default function VideoRoom({
           </div>
         </div>
       )}
+      {/* Incoming DeskLink request modal (owner side) */}
+      {incomingRequest && (
+        <IncomingRequestModal
+          requesterName={incomingRequest.callerName || 'Remote user'}
+          deviceLabel={incomingRequest.fromDeviceId}
+          onAccept={acceptIncomingRequest}
+          onReject={rejectIncomingRequest}
+        />
+      )}
     </div>
   );
 }
 
+export default function VideoRoom(props) {
+  return (
+    <MeetingRemoteControlProvider>
+      <VideoRoomInner {...props} />
+    </MeetingRemoteControlProvider>
+  );
+}

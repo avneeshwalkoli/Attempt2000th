@@ -1,20 +1,20 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\avnee\\OneDrive\\Desktop\\VisionDesk\\anydesk\\DeskLinkAgent\\DeskLinkAgent.csproj": {}
+    "C:\\Users\\vedika sawant\\OneDrive\\Documents\\VisionDesk2\\Attempt2000th\\DeskLinkAgent\\DeskLinkAgent.csproj": {}
   },
   "projects": {
-    "C:\\Users\\avnee\\OneDrive\\Desktop\\VisionDesk\\anydesk\\DeskLinkAgent\\DeskLinkAgent.csproj": {
+    "C:\\Users\\vedika sawant\\OneDrive\\Documents\\VisionDesk2\\Attempt2000th\\DeskLinkAgent\\DeskLinkAgent.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\avnee\\OneDrive\\Desktop\\VisionDesk\\anydesk\\DeskLinkAgent\\DeskLinkAgent.csproj",
+        "projectUniqueName": "C:\\Users\\vedika sawant\\OneDrive\\Documents\\VisionDesk2\\Attempt2000th\\DeskLinkAgent\\DeskLinkAgent.csproj",
         "projectName": "DeskLinkAgent",
-        "projectPath": "C:\\Users\\avnee\\OneDrive\\Desktop\\VisionDesk\\anydesk\\DeskLinkAgent\\DeskLinkAgent.csproj",
-        "packagesPath": "C:\\Users\\avnee\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\avnee\\OneDrive\\Desktop\\VisionDesk\\anydesk\\DeskLinkAgent\\obj\\",
+        "projectPath": "C:\\Users\\vedika sawant\\OneDrive\\Documents\\VisionDesk2\\Attempt2000th\\DeskLinkAgent\\DeskLinkAgent.csproj",
+        "packagesPath": "C:\\Users\\vedika sawant\\.nuget\\packages\\",
+        "outputPath": "C:\\Users\\vedika sawant\\OneDrive\\Documents\\VisionDesk2\\Attempt2000th\\DeskLinkAgent\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
-          "C:\\Users\\avnee\\AppData\\Roaming\\NuGet\\NuGet.Config"
+          "C:\\Users\\vedika sawant\\AppData\\Roaming\\NuGet\\NuGet.Config"
         ],
         "originalTargetFrameworks": [
           "net8.0"
@@ -38,7 +38,7 @@
           "auditLevel": "low",
           "auditMode": "direct"
         },
-        "SdkAnalysisLevel": "9.0.300"
+        "SdkAnalysisLevel": "10.0.100"
       },
       "frameworks": {
         "net8.0": {
@@ -83,19 +83,19 @@
           "downloadDependencies": [
             {
               "name": "Microsoft.AspNetCore.App.Ref",
-              "version": "[8.0.18, 8.0.18]"
+              "version": "[8.0.22, 8.0.22]"
             },
             {
               "name": "Microsoft.NETCore.App.Host.win-x64",
-              "version": "[8.0.18, 8.0.18]"
+              "version": "[8.0.22, 8.0.22]"
             },
             {
               "name": "Microsoft.NETCore.App.Ref",
-              "version": "[8.0.18, 8.0.18]"
+              "version": "[8.0.22, 8.0.22]"
             },
             {
               "name": "Microsoft.WindowsDesktop.App.Ref",
-              "version": "[8.0.18, 8.0.18]"
+              "version": "[8.0.22, 8.0.22]"
             }
           ],
           "frameworkReferences": {
@@ -103,7 +103,7 @@
               "privateAssets": "all"
             }
           },
-          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\9.0.302/PortableRuntimeIdentifierGraph.json"
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.101/PortableRuntimeIdentifierGraph.json"
         }
       }
     }

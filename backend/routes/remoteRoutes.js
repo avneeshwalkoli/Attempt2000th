@@ -1,6 +1,8 @@
+
 const express = require('express');
 const {
   requestRemoteSession,
+  requestMeetingRemoteSession,
   acceptRemoteSession,
   rejectRemoteSession,
   completeRemoteSession,
@@ -8,9 +10,24 @@ const {
 const { protect } = require('../middleware/authMiddleware');
 const { generateTurnCredentials } = require('../utils/sessionToken');
 
+// This log helps verify that the remote routes file is actually loaded in production
+console.log('[remoteRoutes] Initializing /api/remote routes');
+
 const router = express.Router();
 
+// Lightweight debug endpoint to confirm that /api/remote router is mounted correctly
+router.get('/debug', (req, res) => {
+  res.json({
+    ok: true,
+    scope: 'remoteRoutes',
+    timestamp: new Date().toISOString(),
+  });
+});
+
 router.post('/request', protect, requestRemoteSession);
+// In-meeting remote access (webId-only):
+router.post('/meeting-request', protect, requestMeetingRemoteSession);
+
 router.post('/accept', protect, acceptRemoteSession);
 router.post('/reject', protect, rejectRemoteSession);
 router.post('/session/:id/complete', protect, completeRemoteSession);

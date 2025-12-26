@@ -26,7 +26,8 @@ const TURN_ICE_SERVERS = [
 // Configuration
 const args = process.argv.slice(2);
 const config = {
-  serverUrl: args[0] || 'https://anydesk.onrender.com',
+  // Local-first: default to the local DeskLink server unless explicitly overridden
+  serverUrl: args[0] || process.env.DESKLINK_SERVER_URL || 'http://localhost:5000',
   sessionId: args[1],
   token: args[2],
   deviceId: args[3],

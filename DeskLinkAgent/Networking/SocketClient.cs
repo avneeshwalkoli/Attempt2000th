@@ -58,6 +58,43 @@ public class SocketClient : IAsyncDisposable
             var root = doc.RootElement;
             agentJwt = root.GetProperty("agentJwt").GetString() ?? string.Empty;
             ownerUserId = root.GetProperty("ownerUserId").GetString() ?? string.Empty;
+
+            // After successful provision, auto-register this device with the backend
+            // so the mapping deviceId -> userId is always present without any manual step.
+            try
+            {
+                var registerUrl = serverUrl.TrimEnd('/') + "/api/device/register";
+                var osInfo = Environment.OSVersion.ToString();
+                var deviceName = Environment.MachineName;
+                var platform = Environment.OSVersion.Platform.ToString();
+
+                var registerPayload = new
+                {
+                    userId = ownerUserId,
+                    deviceId = _deviceId,
+                    osInfo,
+                    deviceName,
+                    platform
+                };
+
+                var registerJson = JsonSerializer.Serialize(registerPayload);
+                using var registerContent = new System.Net.Http.StringContent(registerJson, System.Text.Encoding.UTF8, "application/json");
+                var registerResp = await http.PostAsync(registerUrl, registerContent);
+                var registerBody = await registerResp.Content.ReadAsStringAsync();
+
+                if (!registerResp.IsSuccessStatusCode)
+                {
+                  Console.Error.WriteLine($"[Agent] /api/device/register failed ({(int)registerResp.StatusCode}): {registerBody}");
+                }
+                else
+                {
+                  Console.WriteLine("[Agent] Device registered successfully with backend.");
+                }
+            }
+            catch (Exception regEx)
+            {
+                Console.Error.WriteLine("[Agent] Device register exception: " + regEx);
+            }
         }
         catch (Exception ex)
         {

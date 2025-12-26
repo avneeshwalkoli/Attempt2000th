@@ -44,6 +44,9 @@ const ensureDeviceOwnership = async (deviceId, userId) => {
 // simple in-memory request throttle: Map<userId, timestamp>
 const lastRequestAt = new Map();
 
+// Generic DeskLink remote request (non-meeting flows).
+// This endpoint preserves the legacy behavior: explicit fromUserId/fromDeviceId
+// in the body, with strict ownership enforcement.
 const requestRemoteSession = async (req, res) => {
   const { fromUserId, fromDeviceId, toUserId, toDeviceId } = req.body;
 
@@ -361,8 +364,115 @@ const completeRemoteSession = async (req, res) => {
   }
 };
 
+// In-meeting remote access request (webId-only, background agent based).
+// fromUserId is ALWAYS req.user._id, never read from the body.
+// Frontend sends ONLY toUserId.
+const requestMeetingRemoteSession = async (req, res) => {
+  const fromUserId = String(req.user && req.user._id);
+  const { toUserId } = req.body || {};
+
+  if (!fromUserId) {
+    return res.status(401).json({ message: 'Not authenticated' });
+  }
+
+  if (!toUserId) {
+    return res.status(400).json({ message: 'toUserId is required' });
+  }
+
+  try {
+    const now = Date.now();
+    const lastAt = lastRequestAt.get(fromUserId) || 0;
+    if (now - lastAt < 1000) {
+      return res.status(429).json({ message: 'Too many requests' });
+    }
+    lastRequestAt.set(fromUserId, now);
+
+    // Resolve active viewer device for this user (background agent)
+    const viewerDevice = await Device.findOne({
+      userId: fromUserId,
+      deleted: false,
+      blocked: false,
+    }).sort({ lastOnline: -1 });
+
+    if (!viewerDevice) {
+      return res.status(404).json({ message: 'No active DeskLink agent running for this user' });
+    }
+
+    const fromDeviceId = viewerDevice.deviceId;
+
+    let effectiveToUserId = toUserId;
+    let receiverDevice;
+
+    // Resolve receiver device by user/contact mapping (same as generic flow)
+    receiverDevice = await ContactLink.findOne({
+      ownerUserId: fromUserId,
+      contactUserId: toUserId,
+      blocked: false,
+    });
+
+    if (receiverDevice) {
+      receiverDevice = await Device.findOne({
+        deviceId: receiverDevice.contactDeviceId,
+        deleted: false,
+        blocked: false,
+      });
+    } else {
+      receiverDevice = await Device.findOne({
+        userId: toUserId,
+        deleted: false,
+        blocked: false,
+      }).sort({ lastOnline: -1 });
+    }
+
+    if (!receiverDevice) {
+      return res
+        .status(404)
+        .json({ message: 'Receiver device not found or offline' });
+    }
+
+    if (!effectiveToUserId) {
+      return res.status(400).json({
+        message:
+          'receiverUserId could not be resolved (device/user mapping missing)',
+      });
+    }
+
+    if (String(fromUserId) === String(effectiveToUserId)) {
+      return res
+        .status(400)
+        .json({ message: 'Cannot start a session with yourself' });
+    }
+
+    const session = await RemoteSession.create({
+      sessionId: new mongoose.Types.ObjectId().toString(),
+      callerUserId: fromUserId,
+      receiverUserId: effectiveToUserId,
+      callerDeviceId: fromDeviceId,
+      receiverDeviceId: receiverDevice.deviceId,
+      status: 'pending',
+      startedAt: new Date(),
+    });
+
+    const payload = {
+      sessionId: session.sessionId,
+      fromUserId,
+      fromDeviceId,
+      callerName: req.user.fullName,
+      receiverDeviceId: session.receiverDeviceId,
+    };
+
+    emitToUser(effectiveToUserId, 'desklink-remote-request', payload);
+
+    res.status(201).json({ session });
+  } catch (error) {
+    console.error('[requestMeetingRemoteSession] error', error);
+    res.status(400).json({ message: error.message });
+  }
+};
+
 module.exports = {
   requestRemoteSession,
+  requestMeetingRemoteSession,
   acceptRemoteSession,
   rejectRemoteSession,
   completeRemoteSession,

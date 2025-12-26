@@ -438,11 +438,11 @@ socket.on('webrtc-cancel', async ({ sessionId, fromUserId }) => {
     socket.on('user-joined', ({ roomId, userId, userName, isHost }) => {
       socket.join(roomId);
       socket.data.roomId = roomId;
-      socket.data.userId = userId;
+      socket.data.userId = userId; // meeting-scoped user id (client-generated)
       socket.data.userName = userName;
       socket.data.isHost = isHost;
 
-      // Add to room
+      // Add to room (store both meeting user id and authenticated backend user id)
       if (!rooms.has(roomId)) {
         rooms.set(roomId, new Map());
       }
@@ -450,6 +450,7 @@ socket.on('webrtc-cancel', async ({ sessionId, fromUserId }) => {
         socketId: socket.id,
         userName,
         isHost,
+        authUserId: socket.userId, // MongoDB User._id as string
       });
 
       // Send list of existing users to the new user
@@ -459,6 +460,7 @@ socket.on('webrtc-cancel', async ({ sessionId, fromUserId }) => {
           userId: uid,
           userName: data.userName,
           isHost: data.isHost,
+          authUserId: data.authUserId,
         }));
 
       socket.emit('room-users', existingUsers);
@@ -488,6 +490,7 @@ socket.on('webrtc-cancel', async ({ sessionId, fromUserId }) => {
         userId,
         userName,
         isHost,
+        authUserId: socket.userId,
       });
 
       console.log(`User ${userName} (${userId}) joined room ${roomId}`);

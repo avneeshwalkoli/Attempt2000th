@@ -16,6 +16,7 @@ import {
   Settings,
   Info,
   MoreVertical,
+  Share2,
 } from 'lucide-react';
 
 export default function ControlsBar({
@@ -37,6 +38,9 @@ export default function ControlsBar({
   canUseMic = true,
   canUseCamera = true,
   isChatDisabled = false,
+  // In-meeting remote control (VisionDesk Control Mode)
+  isRemoteControlOpen = false,
+  onToggleRemoteControl,
 }) {
   return (
     <div className="border-t border-slate-800 bg-[#1E293B] px-6 py-4">
@@ -122,6 +126,19 @@ export default function ControlsBar({
             title={isScreenSharing ? 'Stop sharing' : 'Share screen'}
           >
             <Monitor className="h-5 w-5" />
+          </button>
+
+          {/* Remote Control - In-Meeting VisionDesk Control Mode */}
+          <button
+            onClick={onToggleRemoteControl}
+            className={`flex items-center justify-center w-12 h-12 rounded-full transition-all ${
+              isRemoteControlOpen
+                ? 'bg-purple-600 text-white hover:bg-purple-500'
+                : 'bg-slate-700 text-white hover:bg-slate-600'
+            }`}
+            title="Remote Control"
+          >
+            <Share2 className="h-5 w-5" />
           </button>
 
           {/* Host Tools (only for host) */}
